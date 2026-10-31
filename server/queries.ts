@@ -40,7 +40,8 @@ export async function convFilter(user: SessionUser, qs: URLSearchParams, opts: {
 		const me = p(f, ids);
 		const uid = p(f, user.id);
 		f.where.push(`(c.participants && ${me}::text[] or c.staff_participants && ${me}::text[] or c.assignee_id = ${uid}
-			or c.mailbox_ids && (select coalesce(array_agg(id), '{}') from mailboxes where created_by = ${uid} and provider in ('microsoft','gmail')))`);
+			or c.mailbox_ids && (select coalesce(array_agg(id), '{}') from mailboxes where created_by = ${uid})
+			or c.mailbox_ids && (select coalesce(array_agg(mailbox_id), '{}') from user_mailboxes where user_id = ${uid}))`);
 	}
 	const scope = await mailboxScope(user);
 	if (scope) f.where.push(`c.mailbox_ids && ${p(f, scope)}::bigint[]`);

@@ -1175,6 +1175,67 @@ r.get('/api/system/status', async (ctx) => {
 	};
 });
 
+// what has been read, sorted and analysed, so the numbers across the app can be reconciled
+r.get('/api/system/processing', async (ctx) => {
+	requireRole(ctx.user, 'analyst');
+	const org = ctx.user!.orgId;
+	const [mailboxes, emails, threads, runs, ai, usage] = await Promise.all([
+		q<any>(
+			`select m.id, m.address, m.display_name, m.provider, m.status, m.last_error, m.last_synced_at, m.backfill_days, m.created_at,
+			        (m.sync_state ? 'historyId' and not (m.sync_state ? 'pageToken')) as backfill_done,
+			        (select count(*) from emails e where e.mailbox_id=m.id)::int as emails,
+			        (select count(*) from emails e where e.mailbox_id=m.id and e.is_duplicate)::int as duplicates,
+			        (select min(e.sent_at) from emails e where e.mailbox_id=m.id) as oldest,
+			        (select max(e.sent_at) from emails e where e.mailbox_id=m.id) as newest,
+			        (select count(*) from conversations c where c.org_id=m.org_id and m.id = any(c.mailbox_ids))::int as threads
+			   from mailboxes m where m.org_id=$1 order by m.address`,
+			[org],
+		),
+		one<any>(
+			`select count(*)::int as stored, count(*) filter (where is_duplicate)::int as duplicates,
+			        count(*) filter (where not is_duplicate and direction='inbound')::int as inbound,
+			        count(*) filter (where not is_duplicate and direction='outbound')::int as outbound,
+			        count(*) filter (where not is_duplicate and direction='internal')::int as internal,
+			        count(*) filter (where sent_at > now() - interval '30 days')::int as last_30_days
+			   from emails where org_id=$1`,
+			[org],
+		),
+		one<any>(
+			`select count(*) filter (where message_count > 0)::int as total,
+			        count(*) filter (where message_count > 0 and customer_id is not null and not is_automated)::int as external,
+			        count(*) filter (where message_count > 0 and is_internal)::int as internal,
+			        count(*) filter (where message_count > 0 and is_automated)::int as automated,
+			        count(*) filter (where message_count > 0 and needs_analysis)::int as waiting,
+			        count(*) filter (where analysed_at is not null and analysis_model not like 'remail-heuristic%')::int as by_ai,
+			        count(*) filter (where analysis_model = 'remail-heuristic-v1')::int as by_rules,
+			        count(*) filter (where analysis_model like '%(fallback)%')::int as by_fallback,
+			        count(*) filter (where awaiting_reply and status in ('open','in_progress'))::int as awaiting,
+			        count(*) filter (where rag='red' and status in ('open','in_progress'))::int as red,
+			        count(*) filter (where rag='amber' and status in ('open','in_progress'))::int as amber,
+			        count(*) filter (where last_message_at > now() - interval '30 days' and message_count > 0)::int as last_30_days,
+			        (select count(*) from reply_drafts d where d.org_id=$1 and d.status='draft')::int as drafts,
+			        (select count(*) from reply_drafts d where d.org_id=$1 and d.status='sent')::int as sent,
+			        (select count(*) from alerts a where a.org_id=$1 and a.status='open')::int as alerts_open,
+			        (select count(*) from customers k where k.org_id=$1)::int as contacts
+			   from conversations where org_id=$1`,
+			[org],
+		),
+		q<any>(
+			`select r.started_at, r.finished_at, r.fetched, r.inserted, r.duplicates, r.error, m.address
+			   from sync_runs r join mailboxes m on m.id=r.mailbox_id where m.org_id=$1 order by r.started_at desc limit 15`,
+			[org],
+		),
+		one<any>('select paused_until, last_error, last_error_at, provider from ai_state where id=1').catch(() => null),
+		one<any>(`select count(*)::int calls, coalesce(sum(input_tokens),0)::bigint input_tokens, coalesce(sum(output_tokens),0)::bigint output_tokens
+		            from ai_usage where org_id=$1 and created_at > now() - interval '24 hours' and purpose='analysis'`, [org]),
+	]);
+	return {
+		ai: { provider: aiProvider(), model: aiModel(), ...ai, last24h: usage },
+		emails, threads, mailboxes, runs,
+		worker: await one<any>(`select until from worker_lease where name='tick'`).catch(() => null),
+	};
+});
+
 r.post('/api/system/demo', async (ctx) => {
 	requireRole(ctx.user, 'admin');
 	if (!demoEnabled()) throw new HttpError(400, 'Demo data is switched off on this site (set DEMO_DATA_ENABLED=true to allow it)');

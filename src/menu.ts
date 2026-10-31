@@ -1,7 +1,7 @@
 import type { IconType } from 'react-icons';
 import {
 	MdAutoAwesome, MdDashboard, MdNotificationsActive, MdBusiness, MdForum, MdChecklist,
-	MdInsights, MdAssessment, MdInbox, MdGroup, MdSettings, MdHistory, MdToday, MdDrafts, MdRequestQuote, MdGroups, MdHelpOutline,
+	MdInsights, MdAssessment, MdInbox, MdGroup, MdSettings, MdHistory, MdToday, MdDrafts, MdRequestQuote, MdGroups, MdHelpOutline, MdSync,
 } from 'react-icons/md';
 
 export interface MenuItem {
@@ -46,6 +46,7 @@ export const menu: { section: string; items: MenuItem[] }[] = [
 	{
 		section: 'Admin',
 		items: [
+			{ id: 'processing', text: 'Processing status', path: '/admin/processing', icon: MdSync, minRole: 'analyst' },
 			{ id: 'mailboxes', text: 'Mailboxes', path: '/admin/mailboxes', icon: MdInbox, minRole: 'analyst' },
 			{ id: 'users', text: 'Users and access', path: '/admin/users', icon: MdGroup, minRole: 'manager' },
 			{ id: 'settings', text: 'Settings', path: '/admin/settings', icon: MdSettings, minRole: 'manager' },

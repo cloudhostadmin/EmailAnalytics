@@ -98,7 +98,7 @@ export default function Layout() {
 						</div>
 					)}
 					{summary.data?.sync?.last_synced_at && (
-						<span className="badge outline small" title="Last mailbox sync"><MdSync /> Synced {ago(summary.data.sync.last_synced_at)}</span>
+						<span className="badge outline small cursor" title="Last mailbox sync. Select to see what has been processed" onClick={() => nav('/admin/processing')}><MdSync /> Synced {ago(summary.data.sync.last_synced_at)}</span>
 					)}
 					<form
 						className="header-search"
