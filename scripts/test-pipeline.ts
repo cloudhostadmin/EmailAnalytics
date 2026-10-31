@@ -4,7 +4,11 @@ import { ensureSchema, getPool, q, one } from '../server/db';
 import { defaultOrgId } from '../server/auth';
 import { getOrg } from '../server/settings';
 import { ingestMessages } from '../server/ingest';
-import { analysePending } from '../server/analyze';
+import { analysePending, backfillSubcategories } from '../server/analyze';
+import { SUBCATEGORIES, normaliseSubcategory } from '../server/ai/taxonomy';
+import { DEFAULT_TEMPLATES, listTemplates, templatesForGroup } from '../server/templates';
+import { importCsv, matchReference, parseCsv } from '../server/reference';
+import { categoryReport } from '../server/views';
 import { heuristicAnalyse } from '../server/ai/heuristic';
 import { cleanBody, normalizeSubject, redactPII } from '../server/text';
 import { placeholders, sendDraft, bodyToHtml } from '../server/drafts';
@@ -42,6 +46,17 @@ assert.ok(placeholders(hi.suggested_reply).length >= 1);
 // Kalyan subscription
 const kal = heuristicAnalyse(input('मेरी कल्याण ग्राहक संख्या SUB-74013 है। इस माह का अंक अभी तक नहीं मिला है।', 'कल्याण का अंक'));
 assert.equal(kal.business_category, 'kalyan');
+
+// subgroups: every analysis gets one that belongs to its group
+assert.equal(bulk.subcategory, 'institution_order');
+assert.equal(hi.subcategory, 'damaged_book');
+assert.equal(kal.subcategory, 'issue_not_received');
+assert.equal(normaliseSubcategory('kalyan', 'nonsense'), 'renewal');
+for (const [g, list] of Object.entries(DEFAULT_TEMPLATES))
+	for (const sub of Object.keys(list)) assert.ok(SUBCATEGORIES[g as keyof typeof SUBCATEGORIES].some((x) => x.key === sub), `template ${g}/${sub} matches a subgroup`);
+for (const [g, list] of Object.entries(SUBCATEGORIES))
+	for (const sg of list) if (sg.replies) assert.ok(DEFAULT_TEMPLATES[g]?.[sg.key], `subgroup ${g}/${sg.key} has a default template`);
+assert.deepEqual(parseCsv('a,b\n"x, y","he said ""hi"""\n'), [['a', 'b'], ['x, y', 'he said "hi"']]);
 
 // outgoing email: Hindi subject encoded, threaded headers present, placeholders highlighted in HTML
 const mime = buildMime({ from: 'orders@gitapress.org', to: ['r@gmail.com'], cc: [], subject: 'Re: पुस्तक', text: 'धन्यवाद', html: '<p>धन्यवाद</p>', inReplyTo: '<a@b>', references: ['<a@b>'] });
@@ -85,5 +100,32 @@ assert.ok(!(await one('select 1 from reply_drafts where conversation_id=$1', [co
 // Send is refused while yellow items remain
 const admin = await one<any>(`insert into users (org_id, email, full_name, role) values ($1,'t@gitapress.org','Test','admin') returning id`, [orgId]);
 await assert.rejects(sendDraft({}, { id: admin.id, orgId } as any, draft.id, {}), /Fill in the/);
+assert.ok(waiting.subcategory && SUBCATEGORIES[waiting.business_category as keyof typeof SUBCATEGORIES].some((x) => x.key === waiting.subcategory), `subgroup stored: ${waiting.business_category}/${waiting.subcategory}`);
+assert.match(draft.body, /^Respected Meena ji,/, 'rules-engine draft follows the default template');
+
+// templates are seeded, editable and given to the AI for the likely group
+const tpls = await listTemplates(orgId);
+assert.equal(tpls.length, Object.values(DEFAULT_TEMPLATES).reduce((n, l) => n + Object.keys(l).length, 0), 'every default template seeded');
+const forKalyan = await templatesForGroup(orgId, 'kalyan', 'issue_not_received');
+assert.equal(forKalyan[0].subgroup, 'issue_not_received');
+
+// reference data: catalogue upload and matching against an email
+const imp = await importCsv(orgId, 'book', 'code,title,language,price,in_stock\nGP-17,Shrimad Bhagavad Gita Tattva Vivechani,Hindi,250,yes\nGP-18,Ramcharitmanas,Hindi,300,no\n', true);
+assert.equal(imp.added, 2);
+assert.equal((await importCsv(orgId, 'book', 'code,title,price\nGP-18,Ramcharitmanas,320\n', false)).updated, 1);
+await importCsv(orgId, 'faq', 'question,answer,keywords\nHow long does dispatch take?,Within 3 to 5 working days.,dispatch time;how long\n', true);
+const mt = await matchReference(orgId, 'Please send 20 copies of Shrimad Bhagavad Gita Tattva Vivechani. How long does dispatch take?');
+assert.ok(mt.some((m) => /Tattva Vivechani/.test(m.title) && /₹250/.test(m.text)), `book matched: ${JSON.stringify(mt)}`);
+assert.ok(mt.some((m) => m.kind === 'faq'), 'faq matched');
+assert.ok(!mt.some((m) => /Ramcharitmanas/.test(m.title)), 'unrelated book not matched');
+
+// threads analysed before subgroups existed are back-filled; the report has headings and subheadings
+await q('update conversations set subcategory=null where id=$1', [waiting.id]);
+assert.ok((await backfillSubcategories(orgId)) >= 1);
+assert.ok((await one<any>('select subcategory from conversations where id=$1', [waiting.id])).subcategory);
+const rep = await categoryReport({ id: admin.id, orgId, email: 't@gitapress.org', role: 'admin', allMailboxes: true } as any, new URLSearchParams({ audience: 'all', to: new Date(Date.now() + 86400_000).toISOString() }));
+const g = rep.groups.find((x: any) => x.conversations > 0)!;
+assert.ok(g.label && g.subgroups.length, 'report group has subgroups');
+assert.equal(rep.totals.conversations, rep.groups.reduce((n: number, x: any) => n + x.conversations, 0));
 console.log('All pipeline tests passed');
 await getPool().end();

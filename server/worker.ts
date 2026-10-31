@@ -5,7 +5,7 @@ import { microsoftSync } from './connectors/microsoft';
 import { gmailSync, loadServiceAccount } from './connectors/gmail';
 import type { MailboxRow, SyncBatch } from './connectors/types';
 import { ingestMessages } from './ingest';
-import { analysePending, backfillHealthHistory } from './analyze';
+import { analysePending, backfillHealthHistory, backfillSubcategories } from './analyze';
 import { evaluateSlaAlerts, processEscalations } from './alerts';
 import { runDueReports } from './reports';
 import { evaluateDeliveryAlerts, sendDailyDigests } from './digest';
@@ -85,6 +85,7 @@ export async function runTick(opts: { budgetMs?: number; mailboxId?: number; rep
 		if (n === 0) break;
 	}
 	log.analysed = analysed;
+	log.subgroups = await backfillSubcategories(orgId).catch((e) => (console.error('[subgroups]', e.message), 0));
 	// once a day, make sure history exists for every customer (cheap when already present)
 	if (new Date().getUTCHours() === 2 || analysed > 50) await backfillHealthHistory(orgId, 60).catch((e) => console.error('[history]', e.message));
 	await evaluateSlaAlerts(orgId).catch((e) => console.error('[sla]', e.message));

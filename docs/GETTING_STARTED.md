@@ -108,7 +108,20 @@ Set these in Netlify, then redeploy. Nothing else changes: drafts, yellow items 
 
 Threads already analysed keep their analysis. New mail, and threads that fell back to the rules engine, are analysed by Claude. Use **Rewrite** on a draft, or **Re-analyse** on a thread, to redo one with Claude.
 
-## Step 8. Using reply drafts
+## Step 8. Templates and reference data (15 minutes, recommended)
+
+Open **Help and templates** in the menu.
+
+1. **Email categories** lists every group and subgroup. The category report under **Email → Category report** uses the same headings.
+2. **Reply templates** has one default reply for each subgroup that needs an answer. Managers select **Edit** to change the wording; **Restore default** undoes it. `{{name}}`, `{{order_ref}}`, `{{book}}` and `{{signature}}` are filled in automatically, and `[[provide: …]]` becomes a yellow item.
+3. **Reference data**: upload CSV files (Excel → Save as → CSV UTF-8):
+   * Book catalogue: `code, title, language, price, in_stock, notes, keywords`
+   * FAQs: `question, answer, keywords`
+   * Policies: `title, text, keywords`
+
+   Select **Sample file** to see the format, and **Try matching** to check which entries an email would bring in.
+
+## Step 9. Using reply drafts
 
 * **Replies to send** lists every email waiting on an answer, with a complete reply already drafted in the language the reader wrote in.
 * Text in **yellow** is information the AI does not have, for example "confirm whether 5,000 copies can be supplied within 2 months (yes / no / partial)". Click it and type the answer. **Next** jumps to the next one.

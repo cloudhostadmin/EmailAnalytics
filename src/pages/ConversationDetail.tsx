@@ -9,11 +9,13 @@ import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { useFilterOptions } from '../components/FilterBar';
 import { Card, Empty, Health, Loader, RagBadge, SentimentBadge, StateBadge, StatusBadge, TierBadge, UrgencyBadge } from '../components/ui';
+import { useTaxonomy } from '../lib/taxonomy';
 import { BUSINESS_COLORS, BUSINESS_LABELS, COLORS, STAGE_LABELS, ago, bizLabel, catLabel, fmtDate, fmtDateTime, minutes, hoursSince } from '../lib/format';
 
 export default function ConversationDetail() {
 	const { id } = useParams();
 	const nav = useNavigate();
+	const { groups, subLabel } = useTaxonomy();
 	const { can } = useAuth();
 	const toast = useToast();
 	const qc = useQueryClient();
@@ -54,7 +56,7 @@ export default function ConversationDetail() {
 			<div className="page-head">
 				<div className="grow">
 					<div className="row wrap mb-8">
-						<span className="badge" style={{ background: (BUSINESS_COLORS[c.business_category] || '#ccc') + '22', color: 'var(--text)' }}>{bizLabel(c.business_category)}</span>
+						<span className="badge" style={{ background: (BUSINESS_COLORS[c.business_category] || '#ccc') + '22', color: 'var(--text)' }}>{bizLabel(c.business_category)}{subLabel(c.business_category, c.subcategory) ? ` · ${subLabel(c.business_category, c.subcategory)}` : ''}</span>
 						{c.is_internal && <span className="badge navy">Internal</span>}
 						{c.is_automated && <span className="badge">Automated</span>}
 						<RagBadge rag={c.rag} />
@@ -84,6 +86,10 @@ export default function ConversationDetail() {
 						</select>
 						<select className="input" style={{ width: 230 }} value={c.business_category} onChange={(e) => update.mutate({ businessCategory: e.target.value })} aria-label="Email type" title="Correct the email type">
 							{Object.entries(BUSINESS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+						</select>
+						<select className="input" style={{ width: 220 }} value={c.subcategory || ''} onChange={(e) => update.mutate({ subcategory: e.target.value })} aria-label="Subgroup" title="Correct the subgroup">
+							{!c.subcategory && <option value="">Subgroup not set</option>}
+							{(groups.find((g) => g.key === c.business_category)?.subgroups || []).map((sg) => <option key={sg.key} value={sg.key}>{sg.label}</option>)}
 						</select>
 						<button className="btn" onClick={() => reanalyse.mutate()} disabled={reanalyse.isPending}><MdRefresh /> {reanalyse.isPending ? 'Analysing…' : 'Re-analyse'}</button>
 					</div>

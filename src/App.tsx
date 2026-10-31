@@ -25,6 +25,8 @@ import Users from './pages/admin/Users';
 import Settings from './pages/admin/Settings';
 import Audit from './pages/admin/Audit';
 import Profile from './pages/Profile';
+import Help from './pages/Help';
+import CategoryReport from './pages/CategoryReport';
 import { Loader } from './components/ui';
 
 function Protected({ children, min }: { children: ReactNode; min?: 'viewer' | 'analyst' | 'manager' | 'admin' }) {
@@ -56,6 +58,8 @@ export default function App() {
 				<Route path="/overview" element={<Overview />} />
 				<Route path="/my-day" element={<MyDay />} />
 				<Route path="/all-email" element={<AllEmail />} />
+				<Route path="/category-report" element={<CategoryReport />} />
+				<Route path="/help" element={<Help />} />
 				<Route path="/proposals" element={<Proposals />} />
 				<Route path="/replies" element={<Drafts />} />
 				<Route path="/team" element={<Protected min="manager"><Team /></Protected>} />

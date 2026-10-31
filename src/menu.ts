@@ -1,7 +1,7 @@
 import type { IconType } from 'react-icons';
 import {
 	MdAutoAwesome, MdDashboard, MdNotificationsActive, MdBusiness, MdForum, MdChecklist,
-	MdInsights, MdAssessment, MdInbox, MdGroup, MdSettings, MdHistory, MdToday, MdDrafts, MdRequestQuote, MdGroups,
+	MdInsights, MdAssessment, MdInbox, MdGroup, MdSettings, MdHistory, MdToday, MdDrafts, MdRequestQuote, MdGroups, MdHelpOutline,
 } from 'react-icons/md';
 
 export interface MenuItem {
@@ -28,7 +28,7 @@ export const menu: { section: string; items: MenuItem[] }[] = [
 		section: 'Management',
 		items: [
 			{ id: 'overview', text: 'Overview', path: '/overview', icon: MdDashboard },
-			{ id: 'email', text: 'Email', path: '/all-email', also: ['/critical', '/conversations'], icon: MdForum, badge: 'critical' },
+			{ id: 'email', text: 'Email', path: '/all-email', also: ['/critical', '/conversations', '/category-report'], icon: MdForum, badge: 'critical' },
 			{ id: 'customers', text: 'Readers and customers', path: '/customers', icon: MdBusiness },
 			{ id: 'proposals', text: 'Bulk orders and quotes', path: '/proposals', icon: MdRequestQuote },
 			{ id: 'actions', text: 'Actions and commitments', path: '/actions', icon: MdChecklist },
@@ -50,6 +50,7 @@ export const menu: { section: string; items: MenuItem[] }[] = [
 			{ id: 'users', text: 'Users and access', path: '/admin/users', icon: MdGroup, minRole: 'manager' },
 			{ id: 'settings', text: 'Settings', path: '/admin/settings', icon: MdSettings, minRole: 'manager' },
 			{ id: 'audit', text: 'Audit log', path: '/admin/audit', icon: MdHistory, minRole: 'admin' },
+			{ id: 'help', text: 'Help and templates', path: '/help', icon: MdHelpOutline },
 		],
 	},
 ];
@@ -57,5 +58,6 @@ export const menu: { section: string; items: MenuItem[] }[] = [
 export const titleFor = (path: string) => {
 	for (const s of menu) for (const i of s.items) if ([i.path, ...(i.also || [])].some((p) => path.startsWith(p))) return i.text;
 	if (path.startsWith('/profile')) return 'My profile';
+	if (path.startsWith('/category-report')) return 'Category report';
 	return 'Gita Mail';
 };

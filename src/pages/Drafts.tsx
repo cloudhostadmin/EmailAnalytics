@@ -7,9 +7,11 @@ import { useFilters } from '../contexts/FilterContext';
 import DraftEditor, { countPlaceholders } from '../components/DraftEditor';
 import { Card, Empty, Loader, PageHead, RagDot, Segmented } from '../components/ui';
 import { COLORS, ago, bizLabel } from '../lib/format';
+import { useTaxonomy } from '../lib/taxonomy';
 
 export default function Drafts() {
 	const { params } = useFilters();
+	const { subLabel } = useTaxonomy();
 	const [status, setStatus] = useState<'draft' | 'sent' | 'dismissed'>('draft');
 	const { data, isLoading } = useQuery({
 		queryKey: ['drafts', params.view, params.mailbox, status],
@@ -48,7 +50,7 @@ export default function Drafts() {
 									</div>
 									<div className="small truncate">{r.conv_subject}</div>
 									<div className="row xs" style={{ gap: 6, marginTop: 4 }}>
-										<span className="chip">{bizLabel(r.business_category)}</span>
+										<span className="chip">{subLabel(r.business_category, r.subcategory) || bizLabel(r.business_category)}</span>
 										{status === 'draft' && (n > 0 ? <span className="badge amber">{n} to fill in</span> : <span className="badge green">Ready to send</span>)}
 									</div>
 								</button>

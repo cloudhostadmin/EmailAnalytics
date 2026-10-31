@@ -5,7 +5,7 @@ import {
 	mailboxScope, publicUser, requireRole, verifyPassword, ROLE_RANK, type Role,
 	ravityConfigured, ravityForgotPassword, ravityResetPassword, microsoftSsoEnabled, loginWithMicrosoft, loginWithGoogle,
 } from './auth';
-import { categoriesOverview, myDay, proposals, team } from './views';
+import { categoriesOverview, categoryReport, myDay, proposals, team } from './views';
 import { audit } from './audit';
 import { convFilter, dashboardSummary, dashboardTrends, filterOptions, insights } from './queries';
 import { getOrg, invalidateOrg } from './settings';
@@ -24,8 +24,11 @@ import { appUrl, emailLayout, esc, mailerProvider, sendEmail } from './mailer';
 import { buildReport, runSchedule } from './reports';
 import { ask, SUGGESTED_QUESTIONS } from './copilot';
 import { loadDemoData, clearDemoData, demoEnabled } from './demo';
+import { listTemplates, resetTemplate, updateTemplate } from './templates';
+import { deleteReference, importCsv, listReference, matchReference, TEMPLATES_CSV, type RefKind } from './reference';
+import { normaliseSubcategory, subgroupOf, taxonomyTree } from './ai/taxonomy';
 import { dismissDraft, getDraft, getDraftForConversation, listDrafts, saveDraft, sendDraft } from './drafts';
-import { BUSINESS_CATEGORIES, BUSINESS_LABELS, CATEGORIES, CATEGORY_LABELS, PROPOSAL_STAGES } from './ai/types';
+import { BUSINESS_CATEGORIES, BUSINESS_LABELS, CATEGORIES, CATEGORY_LABELS, PROPOSAL_STAGES, type BusinessCategory } from './ai/types';
 import type { MailboxRow } from './connectors/types';
 
 const r = new Router();
@@ -246,7 +249,7 @@ r.get('/api/conversations', async (ctx) => {
 			`select c.id, c.subject, c.summary, c.sentiment, c.sentiment_score, c.rag, c.rag_reason, c.customer_state, c.urgency,
 			        c.escalation_risk, c.priority_score, c.categories, c.status, c.awaiting_reply, c.message_count, c.duplicate_count,
 			        c.last_message_at, c.last_inbound_at, c.first_response_minutes, c.mailbox_ids, c.assignee_id, c.analysed_at,
-			        c.business_category, c.proposal_stage, c.is_internal, c.is_automated,
+			        c.business_category, c.subcategory, c.proposal_stage, c.is_internal, c.is_automated,
 			        cu.id as customer_id, cu.name as customer_name, cu.tier as customer_tier, u.full_name as assignee_name,
 			        (select count(*) from action_items a where a.conversation_id=c.id and a.status='open')::int as open_actions
 			   from conversations c left join customers cu on cu.id=c.customer_id left join users u on u.id=c.assignee_id
@@ -262,7 +265,7 @@ r.get('/api/conversations/export', async (ctx) => {
 	requireRole(ctx.user, 'analyst');
 	const f = await convFilter(ctx.user!, ctx.query);
 	const rows = await q<any>(
-		`select c.id, c.business_category as type, cu.name as customer, cu.tier, c.subject, c.rag, c.sentiment, c.urgency, c.escalation_risk, c.status,
+		`select c.id, c.business_category as type, c.subcategory as subtype, cu.name as customer, cu.tier, c.subject, c.rag, c.sentiment, c.urgency, c.escalation_risk, c.status,
 		        array_to_string(c.categories, '; ') as categories, c.message_count, c.awaiting_reply, c.first_response_minutes,
 		        c.last_message_at, c.summary
 		   from conversations c left join customers cu on cu.id=c.customer_id where ${f.where.join(' and ')}
@@ -319,11 +322,20 @@ r.patch('/api/conversations/:id', async (ctx) => {
 	requireRole(ctx.user, 'analyst');
 	const id = Number(ctx.params.id);
 	await assertConversationAccess(ctx, id);
-	const { status, assigneeId, businessCategory, proposalStage } = ctx.body || {};
+	const { status, assigneeId, businessCategory, subcategory, proposalStage } = ctx.body || {};
 	if (status && !['open', 'in_progress', 'resolved', 'ignored'].includes(status)) throw new HttpError(400, 'Invalid status');
 	if (businessCategory) {
 		if (!(BUSINESS_CATEGORIES as readonly string[]).includes(businessCategory)) throw new HttpError(400, 'Invalid category');
 		await q('update conversations set business_category=$2, category_locked=true where id=$1', [id, businessCategory]);
+	}
+	if (subcategory) {
+		const cur = await one<any>('select business_category from conversations where id=$1', [id]);
+		const group = (businessCategory || cur?.business_category || 'other') as BusinessCategory;
+		if (!subgroupOf(group, subcategory)) throw new HttpError(400, 'That subgroup does not belong to the group');
+		await q('update conversations set subcategory=$2, subcategory_locked=true where id=$1', [id, subcategory]);
+	} else if (businessCategory) {
+		const cur = await one<any>('select subcategory from conversations where id=$1', [id]);
+		if (!subgroupOf(businessCategory, cur?.subcategory)) await q('update conversations set subcategory=$2 where id=$1', [id, normaliseSubcategory(businessCategory, '')]);
 	}
 	if (proposalStage) {
 		if (!(PROPOSAL_STAGES as readonly string[]).includes(proposalStage)) throw new HttpError(400, 'Invalid stage');
@@ -415,6 +427,61 @@ r.post('/api/conversations/:id/reanalyse', async (ctx) => {
 
 // ── Comprehensive and individual views ──────────────────────────────────────
 r.get('/api/views/categories', (ctx) => categoriesOverview(ctx.user!, ctx.query));
+r.get('/api/views/category-report', (ctx) => categoryReport(ctx.user!, ctx.query));
+r.get('/api/views/category-report.csv', async (ctx) => {
+	const rep = await categoryReport(ctx.user!, ctx.query);
+	const cols = ['group', 'subgroup', 'conversations', 'emails', 'awaiting', 'overdue_replies', 'negative', 'red', 'drafts_waiting', 'avg_first_response_hours'];
+	const cell = (v: any) => { const s = v === null || v === undefined ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+	const lines = [cols.join(',')];
+	for (const g of rep.groups) for (const sg of g.subgroups) lines.push([g.label, sg.label, sg.conversations, sg.emails, sg.awaiting, sg.overdue_replies, sg.negative, sg.red, sg.drafts_waiting, sg.avg_first_response_hours].map(cell).join(','));
+	await audit(ctx, 'export.category_report', 'conversation', null, { from: rep.from, to: rep.to });
+	return new Response(lines.join('\n'), {
+		headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="gitamail-category-report-${new Date().toISOString().slice(0, 10)}.csv"` },
+	});
+});
+
+// ── Help: email categories, reply templates and reference data ──────────────
+r.get('/api/taxonomy', async () => ({
+	groups: taxonomyTree().map((g) => ({ ...g, label: BUSINESS_LABELS[g.key] })),
+}));
+r.get('/api/templates', async (ctx) => ({ templates: await listTemplates(ctx.user!.orgId), fields: ['{{name}}', '{{order_ref}}', '{{book}}', '{{signature}}'] }));
+r.put('/api/templates/:id', async (ctx) => {
+	requireRole(ctx.user, 'manager');
+	const t = await updateTemplate(ctx.user!.orgId, ctx.user!.id, Number(ctx.params.id), ctx.body || {});
+	await audit(ctx, 'template.updated', 'reply_template', Number(ctx.params.id));
+	return t;
+});
+r.post('/api/templates/:id/reset', async (ctx) => {
+	requireRole(ctx.user, 'manager');
+	const t = await resetTemplate(ctx.user!.orgId, Number(ctx.params.id));
+	await audit(ctx, 'template.reset', 'reply_template', Number(ctx.params.id));
+	return t;
+});
+r.get('/api/reference', async (ctx) => listReference(ctx.user!.orgId, ctx.query.get('kind') || undefined, ctx.query.get('q') || undefined));
+r.get('/api/reference/sample/:kind', async (ctx) => {
+	const kind = ctx.params.kind as RefKind;
+	if (!TEMPLATES_CSV[kind]) throw new HttpError(404, 'Unknown kind');
+	return new Response(TEMPLATES_CSV[kind], { headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="gitamail-${kind}-sample.csv"` } });
+});
+r.post('/api/reference/import', async (ctx) => {
+	requireRole(ctx.user, 'manager');
+	const { kind, csv, replace } = ctx.body || {};
+	const res = await importCsv(ctx.user!.orgId, kind, String(csv || ''), !!replace);
+	await audit(ctx, 'reference.imported', 'reference_items', null, { kind, ...res, replace: !!replace });
+	return res;
+});
+r.post('/api/reference/test', async (ctx) => ({ matches: await matchReference(ctx.user!.orgId, String(ctx.body?.text || '').slice(0, 5000)) }));
+r.del('/api/reference/:id', async (ctx) => {
+	requireRole(ctx.user, 'manager');
+	return deleteReference(ctx.user!.orgId, Number(ctx.params.id));
+});
+r.del('/api/reference', async (ctx) => {
+	requireRole(ctx.user, 'manager');
+	const kind = ctx.query.get('kind') || '';
+	if (!['book', 'faq', 'policy'].includes(kind)) throw new HttpError(400, 'Say which kind to clear');
+	await audit(ctx, 'reference.cleared', 'reference_items', null, { kind });
+	return deleteReference(ctx.user!.orgId, null, kind);
+});
 r.get('/api/views/my-day', (ctx) => myDay(ctx.user!));
 r.get('/api/views/proposals', (ctx) => proposals(ctx.user!, ctx.query));
 r.get('/api/views/team', async (ctx) => {

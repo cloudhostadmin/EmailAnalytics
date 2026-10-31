@@ -476,4 +476,40 @@ insert into ai_state (id) values (1) on conflict do nothing;
 -- a quota pause belongs to one provider, so switching provider is not held back by the old one's pause
 alter table ai_state add column if not exists provider text;
 ` },
+{ id: '008_subgroups_templates_reference', sql: String.raw`
+-- subgroup (subheading) within business_category
+alter table conversations add column if not exists subcategory text;
+alter table conversations add column if not exists subcategory_locked boolean not null default false;
+create index if not exists conversations_org_cat_sub_idx on conversations (org_id, business_category, subcategory);
+-- default reply template per subgroup; seeded from server/templates.ts, editable by admins
+create table if not exists reply_templates (
+  id          bigserial primary key,
+  org_id      bigint not null references organisations(id) on delete cascade,
+  group_key   text not null,
+  subgroup_key text not null,
+  title       text not null,
+  body        text not null,
+  guidance    text not null default '',
+  is_active   boolean not null default true,
+  is_default  boolean not null default true,
+  updated_at  timestamptz not null default now(),
+  updated_by  bigint references users(id) on delete set null,
+  unique (org_id, group_key, subgroup_key)
+);
+-- reference data used in drafts: book catalogue, FAQs and policies
+create table if not exists reference_items (
+  id          bigserial primary key,
+  org_id      bigint not null references organisations(id) on delete cascade,
+  kind        text not null check (kind in ('book','faq','policy')),
+  code        text,
+  title       text not null,
+  body        text not null default '',
+  keywords    text[] not null default '{}',
+  data        jsonb not null default '{}',
+  updated_at  timestamptz not null default now()
+);
+create index if not exists reference_items_org_kind_idx on reference_items (org_id, kind);
+create unique index if not exists reference_items_code_uq on reference_items (org_id, kind, code) where code is not null;
+-- existing threads get a subgroup from the rules engine in the background (no AI cost); new mail gets it from the AI
+` },
 ];

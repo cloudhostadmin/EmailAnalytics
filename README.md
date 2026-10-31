@@ -20,6 +20,14 @@ Gita Mail reads the Gita Press mailboxes (each person's own inbox, plus shared o
 * Reference information and a signature set in Settings make drafts more complete.
 * Edits are kept, and drafts disappear when someone replies directly in Gmail.
 
+**Groups, subgroups and default replies**
+* Every thread gets a group (heading) and a subgroup (subheading), for example Kalyan subscriptions → Issue not received. 13 groups, 52 subgroups.
+* A default reply template for each of the 45 subgroups that normally need an answer. Claude follows it, translates it for Hindi letters and fills in what it can.
+* Help and templates: how it works, the full category list, the templates (managers can edit or restore them) and reference data.
+* Reference data: upload the book catalogue, FAQs and policies as CSV. Matching entries are given to Claude for each email, so prices, stock and rules are filled in instead of left yellow.
+* Category report (Email → Category report): groups as headings and subgroups as subheadings, with threads, waiting replies, negative and red threads, drafts and first-reply time. Print or download as CSV.
+* Threads analysed before subgroups existed are sorted by the rules engine in the background, with no AI cost.
+
 **Analysis built for Gita Press**
 * Email types:
   * reader and customer service
@@ -57,7 +65,7 @@ Gita Mail reads the Gita Press mailboxes (each person's own inbox, plus shared o
   * `scheduler`: runs every 5 minutes
   * `worker-background`: sync and analysis
 * **Database:** PostgreSQL (Netlify Database or Neon). Migrations run automatically.
-* **AI:** Google Gemini (`gemini-3.8-flash` by default) with structured JSON output. A rules engine tuned for Gita Press is the fallback.
+* **AI:** Anthropic Claude (`AI_PROVIDER=anthropic`, prompt caching on) or Google Gemini, with structured output. A rules engine tuned for Gita Press is the fallback; without the AI it drafts from the default templates.
 
 ## Set up
 

@@ -32,6 +32,8 @@ export async function convFilter(user: SessionUser, qs: URLSearchParams, opts: {
 	else if (audience === 'human') f.where.push(`not c.is_automated`);
 	const types = listParam(qs.get('type'));
 	if (types.length) f.where.push(`c.business_category = any(${p(f, types)})`);
+	const subs = listParam(qs.get('sub'));
+	if (subs.length) f.where.push(`c.subcategory = any(${p(f, subs)})`);
 	// individual view: threads I took part in, am assigned to, or that came from a mailbox I connected
 	if (qs.get('view') === 'me') {
 		const ids = [user.email.toLowerCase(), ...((await one<any>('select email_aliases from users where id=$1', [user.id]))?.email_aliases || [])];

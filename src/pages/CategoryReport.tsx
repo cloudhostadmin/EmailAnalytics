@@ -1,0 +1,113 @@
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
+import { MdDownload, MdPrint } from 'react-icons/md';
+import { api, getToken, qs } from '../api/client';
+import { useFilters } from '../contexts/FilterContext';
+import FilterBar from '../components/FilterBar';
+import { EmailTabs } from './Conversations';
+import { Card, Kpi, Loader, PageHead, RagDot, Switch } from '../components/ui';
+import { BUSINESS_COLORS, COLORS, fmtDate } from '../lib/format';
+
+const n = (v: number) => (v ? v.toLocaleString('en-IN') : <span className="faint">0</span>);
+
+/** Headings are the email groups, subheadings the subgroups. */
+export default function CategoryReport() {
+	const { params, set } = useFilters();
+	const nav = useNavigate();
+	const [showEmpty, setShowEmpty] = useState(false);
+	const p = { ...params, type: undefined, sub: undefined };
+	const { data, isLoading } = useQuery({ queryKey: ['category-report', p], queryFn: () => api(`/views/category-report${qs(p)}`), refetchInterval: 120_000 });
+
+	const open = (group: string, sub?: string) => {
+		set({ type: [group], sub: sub ? [sub] : [] });
+		nav('/conversations?audience=all');
+	};
+	const download = async () => {
+		const res = await fetch(`/api/views/category-report.csv${qs(p)}`, { headers: { authorization: `Bearer ${getToken()}` } });
+		const a = document.createElement('a');
+		a.href = URL.createObjectURL(await res.blob());
+		a.download = `gitamail-category-report-${new Date().toISOString().slice(0, 10)}.csv`;
+		a.click();
+	};
+
+	const groups = (data?.groups || []).filter((g: any) => showEmpty || g.conversations > 0);
+
+	return (
+		<div className="category-report">
+			<PageHead kw="Category" rest="report"
+				sub="Every email thread sorted into groups and subgroups. Each group is a heading and each subgroup a subheading, with the same names used for the default reply templates in Help."
+				actions={<>
+					<button className="btn" onClick={() => window.print()}><MdPrint /> Print</button>
+					<button className="btn" onClick={download}><MdDownload /> Download CSV</button>
+				</>} />
+			<div className="no-print"><EmailTabs /></div>
+			<div className="no-print"><FilterBar show={['mailbox', 'sentiment', 'rag', 'status']} /></div>
+			{isLoading || !data ? <Loader /> : (
+				<>
+					<p className="print-only small">Period {fmtDate(data.from)} to {fmtDate(data.to)}</p>
+					<div className="grid g-4 mb-16">
+						<Kpi label="Threads" value={data.totals.conversations.toLocaleString('en-IN')} accent={COLORS.general} foot={`${data.totals.emails.toLocaleString('en-IN')} emails`} />
+						<Kpi label="Awaiting reply" value={data.totals.awaiting} accent={COLORS.blue} foot={`${data.totals.overdue_replies} past the reply target`} />
+						<Kpi label="Drafts ready to send" value={data.totals.drafts_waiting} accent={COLORS.teal} onClick={() => nav('/replies')} />
+						<Kpi label="Red threads open" value={data.totals.red} accent={COLORS.red} foot={`${data.totals.negative} negative in total`} />
+					</div>
+					<div className="row-between mb-16 no-print">
+						<span className="small faint">Select a subgroup to open its threads.</span>
+						<Switch checked={showEmpty} onChange={setShowEmpty} label="Show groups with no email" />
+					</div>
+					{groups.map((g: any) => (
+						<Card key={g.key} accent={BUSINESS_COLORS[g.key] || COLORS.grey} className="mb-16 report-group"
+							title={<h2>{g.label} <span className="faint" style={{ fontWeight: 600, fontSize: 14 }}>· {g.conversations.toLocaleString('en-IN')} threads</span></h2>}
+							sub={g.description}
+							actions={g.conversations > 0 && <button className="btn sm no-print" onClick={() => open(g.key)}>Open group</button>}
+							flush>
+							<div className="table-wrap">
+								<table className="table">
+									<thead>
+										<tr>
+											<th>Subgroup</th>
+											<th className="num">Threads</th>
+											<th className="num">Awaiting</th>
+											<th className="num">Past target</th>
+											<th className="num">Negative</th>
+											<th className="num">Red</th>
+											<th className="num">Drafts</th>
+											<th className="num">First reply</th>
+											<th>Latest</th>
+										</tr>
+									</thead>
+									<tbody>
+										{g.subgroups.filter((s: any) => showEmpty || s.conversations > 0).map((s: any) => (
+											<tr key={s.key || 'unsorted'} className={s.conversations ? 'click' : ''} onClick={() => s.conversations && s.key && open(g.key, s.key)}>
+												<td style={{ minWidth: 220 }}>
+													<h3 className="report-sub">{s.label}</h3>
+													<div className="xs faint">{s.description}</div>
+												</td>
+												<td className="num"><b>{n(s.conversations)}</b></td>
+												<td className="num">{n(s.awaiting)}</td>
+												<td className="num" style={{ color: s.overdue_replies ? COLORS.red : undefined }}>{n(s.overdue_replies)}</td>
+												<td className="num" style={{ color: s.negative ? COLORS.amber : undefined }}>{n(s.negative)}</td>
+												<td className="num" style={{ color: s.red ? COLORS.red : undefined }}>{n(s.red)}</td>
+												<td className="num">{n(s.drafts_waiting)}</td>
+												<td className="num">{s.avg_first_response_hours === null ? <span className="faint">–</span> : `${s.avg_first_response_hours} h`}</td>
+												<td style={{ maxWidth: 320 }}>
+													{s.recent.map((r: any) => (
+														<div key={r.id} className="xs row gap-4 ellipsis" onClick={(e) => { e.stopPropagation(); nav(`/conversations/${r.id}`); }} style={{ cursor: 'pointer' }}>
+															<RagDot rag={r.rag} /> <span className="ellipsis">{r.subject || '(no subject)'}</span>
+														</div>
+													))}
+												</td>
+											</tr>
+										))}
+									</tbody>
+								</table>
+							</div>
+						</Card>
+					))}
+					{!groups.length && <Card><div className="faint">No email in this period.</div></Card>}
+				</>
+			)}
+		</div>
+	);
+}

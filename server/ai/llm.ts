@@ -5,6 +5,7 @@
  */
 import { q } from '../db';
 import { heuristicAnalyse } from './heuristic';
+import { normaliseSubcategory, taxonomyForPrompt } from './taxonomy';
 import { ANALYSIS_SCHEMA, BUSINESS_CATEGORIES, CATEGORIES, PROPOSAL_STAGES, type Analysis, type ThreadInput } from './types';
 
 export type Provider = 'gemini' | 'anthropic' | 'openai' | 'azure' | 'heuristic';
@@ -44,11 +45,17 @@ Rules:
 - suggested_reply: when the external party is waiting for an answer (requires_reply true), write a COMPLETE reply ready to send, from the ${org} team, answering every question and request in their latest messages, in the same language they wrote in (Hindi in Devanagari if they wrote Hindi). Open with a respectful greeting (for example "Respected Sir/Madam," or "आदरणीय महोदय/महोदया,") and close with the signature given below.
 - In the reply, NEVER guess a fact, decision, price, quantity, date, stock level, policy or commitment you cannot see in the emails or in the reference information. Instead insert a placeholder in exactly this form: [[provide: what the team must fill in]]. Example: a request for 5,000 copies of the Gita within 2 months becomes "[[provide: confirm whether 5,000 copies of the Bhagavad Gita can be supplied within 2 months]]" followed by the rest of the reply written so it reads correctly either way. Use as many placeholders as needed and keep each one short and specific. Never use square brackets inside a placeholder.
 - Use facts from the reference information when they answer the question, instead of a placeholder.
-- When no reply is needed (requires_reply false), suggested_reply is an empty string.`;
+- When no reply is needed (requires_reply false), suggested_reply is an empty string.
+- subcategory: pick exactly one subgroup key from the list for the business_category you chose:
+${taxonomyForPrompt()}
+- Reply templates: when a default template is given for the subgroup you chose, follow its structure, order and wording closely, translating it if the customer wrote in another language. Replace {{name}}, {{order_ref}}, {{book}} and similar fields with facts from the emails, or with a [[provide: …]] placeholder when the fact is not known. Keep the template's own [[provide: …]] placeholders unless the emails or reference information answer them. Answer anything the customer asked that the template does not cover.
+- Catalogue and FAQ entries given under "Matched reference data" are facts you may rely on (title, price, stock, policy). Prefer them over placeholders.`;
 
 function buildPrompt(input: ThreadInput): string {
 	const lines = [
 		input.replyKnowledge ? `Reference information from ${input.orgName} (use it in replies when relevant):\n${input.replyKnowledge.slice(0, 4000)}\n` : '',
+		input.reference?.length ? `Matched reference data:\n${input.reference.map((r) => `- [${r.kind}] ${r.title}: ${r.text}`).join('\n').slice(0, 4000)}\n` : '',
+		input.replyTemplates?.length ? `Default reply templates for the likely group (${input.replyTemplates[0].group}):\n${input.replyTemplates.map((t) => `### ${t.subgroup} (${t.label})\n${t.body}`).join('\n\n').slice(0, 6000)}\n` : '',
 		`Reply signature:\n${input.replySignature || `Regards,\n${input.orgName}`}\n`,
 		input.isInternal ? 'Thread type: internal (staff only, no external party)' : `External party: ${input.customerName || 'Unknown'} (tier: ${input.customerTier || 'standard'})`,
 		`Conversation id: ${input.conversationId}`,
@@ -242,6 +249,7 @@ function coerce(raw: any, fallback: Analysis): Analysis {
 		: bc === 'sales_proposal' ? fallback.proposal : null;
 	return {
 		business_category: bc,
+		subcategory: normaliseSubcategory(bc, raw.subcategory || (bc === fallback.business_category ? fallback.subcategory : '')),
 		proposal: pr,
 		summary: String(raw.summary || fallback.summary).slice(0, 1200),
 		sentiment: pick(raw.sentiment, ['positive', 'neutral', 'negative'] as const, fallback.sentiment),
@@ -314,7 +322,8 @@ export async function analyseThread(input: ThreadInput, orgId: number): Promise<
 			const data = await anthropicCall({
 				model,
 				max_tokens: 6000,
-				system: SYSTEM(input.orgName),
+				// the system prompt is identical for every thread, so it is cached
+				system: [{ type: 'text', text: SYSTEM(input.orgName), cache_control: { type: 'ephemeral' } }],
 				tools: [{ name: 'record_analysis', description: 'Record the structured analysis of the email conversation.', input_schema: ANALYSIS_SCHEMA }],
 				tool_choice: { type: 'tool', name: 'record_analysis' },
 				messages: [{ role: 'user', content: buildPrompt(input) }],

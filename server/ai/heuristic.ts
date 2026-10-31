@@ -3,6 +3,7 @@
  * and in tests. Tuned for Gita Press: readers, book orders, Kalyan subscriptions, VPP dispatch,
  * distributors and general business email, in English and Hindi.
  */
+import { normaliseSubcategory } from './taxonomy';
 import { CATEGORY_LABELS, type Analysis, type BusinessCategory, type Category, type ProposalStage, type Sentiment, type ThreadInput } from './types';
 
 const NEG: [RegExp, number][] = [
@@ -209,6 +210,81 @@ function detectProposal(msgs: ThreadInput['messages'], text: string): Analysis['
 	return { kind, stage, deadline: dl ? parseDue(dl, new Date(msgs[0].sentAt)) : null, value: amount, lanes_or_scope: scope, next_step: next };
 }
 
+/** Subgroup rules per group, checked in order; the first match wins, otherwise the group's fallback. */
+const SUB_RULES: Partial<Record<BusinessCategory, [string, RegExp][]>> = {
+	customer_service: [
+		['damaged_book', /\b(damaged?|torn|wet|misprint(ed)?|pages? (missing|torn|blank)|binding)\b|फटे|फटी|फटा|खराब|छपाई|क्षतिग्रस्त/i],
+		['wrong_item', /\b(wrong (book|item|edition|language|title)|sent (me )?the wrong|missing (book|item|cop(y|ies))|short (supplied|shipped))\b|गलत पुस्तक|गलत किताब/i],
+		['not_received', /\b(not received|never (received|arrived)|did(n'?t| not) (receive|get)|haven'?t (received|got))\b|नहीं मिल|प्राप्त नहीं/i],
+		['complaint_service', /\b(no (one|response|reply)|nobody|ignored|rude|poor service|unacceptable|complain)\b|शिकायत|कोई जवाब नहीं/i],
+		['feedback', /\b(thank you so much|grateful|blessings|appreciate|suggestion|feedback)\b|आभार|धन्यवाद/i],
+	],
+	book_orders: [
+		['payment_issue', /\b(payment (failed|pending|deducted)|money (was )?deducted|debited|paid but|transaction)\b|भुगतान|पैसे कट/i],
+		['cancellation', /\b(cancel|change (my |the )?order|modify|add (one|another) (book|title))\b|रद्द/i],
+		['ebook_app', /\b(app|e-?books?|website|log ?in|password|otp|android|iphone)\b/i],
+		['order_status', /\b(status|where is my order|when will (my|the) order|dispatched yet|order (no|number|id))\b/i],
+		['availability', /\b(available|availability|in stock|price|cost|how much)\b|उपलब्ध|मूल्य|कीमत/i],
+	],
+	kalyan: [
+		['issue_not_received', /\b(not received|did(n'?t| not) (receive|get)|missing issue|haven'?t (received|got))\b|नहीं मिल|प्राप्त नहीं/i],
+		['address_change', /\b(change (of|my) address|new address|address (has )?changed|update (my )?address)\b|पता बदल/i],
+		['back_issues', /\b(back issues?|old issues?|special issue|visheshank|annual number)\b|विशेषांक|पुराने अंक/i],
+		['new_subscription', /\b(new subscri|want to subscribe|become a subscriber|how (can|do) i subscribe|start (a |my )?subscription)\b|नई सदस्यता|ग्राहक बनना/i],
+		['renewal', /\b(renew|renewal|expir)\b|नवीनीकरण/i],
+	],
+	dispatch: [
+		['vpp_return', /\b(vpp (was |is )?(returned|refused)|returned to (sender|you)|rts|not collected|refused)\b/i],
+		['courier_damage', /\b(damaged|broken|opened|torn) (parcel|packet|package|box)|(parcel|packet|package) (arrived |was )?(damaged|opened|torn)\b/i],
+		['address_problem', /\b(wrong address|incomplete address|address (not found|incorrect)|undeliverable)\b/i],
+		['delivery_delay', /\b(late|delay(ed)?|stuck|still (in transit|not delivered)|taking (so )?long)\b|देर|विलंब/i],
+		['tracking', /\b(track|tracking|consignment|awb|where is)\b/i],
+	],
+	sales_proposal: [
+		['international', /\b(usa|uk|canada|australia|nepal|mauritius|fiji|singapore|dubai|uae|overseas|international|export|shipping abroad)\b/i],
+		['dealership', /\b(dealership|become (a )?(dealer|distributor|stockist)|bookseller|book seller|open a (shop|stall))\b|विक्रेता बनना/i],
+		['negotiation', /\b(counter|revised|(more|better|higher|extra|additional) discount|negotiat|best price|can you do better|follow(ing)? up on (the|our) quote)\b/i],
+		['distributor_order', /\b(repeat order|our usual order|as (per|usual)|restock|our (dealer|distributor) (code|number))\b/i],
+		['institution_order', /\b(temple|school|ashram|library|satsang|trust|college|university|event|distribution|\d{1,3}(,\d{3})+ (copies|books))\b|मंदिर|विद्यालय|आश्रम/i],
+		['quote_request', /\b(quote|quotation|price list|rates?|trade discount)\b/i],
+	],
+	publications: [
+		['permission', /\b(permission|copyright|reproduce|reprint (rights)?|quote from|record|youtube|podcast)\b|अनुमति/i],
+		['errata', /\b(error|mistake|typo|errata|misprint|wrong (word|verse|translation))\b|त्रुटि|गलती/i],
+		['manuscript', /\b(manuscript|article|submission|submit (my|an)|publish my)\b|लेख|पांडुलिपि/i],
+		['translation_request', /\b(translation|translate|in (english|tamil|telugu|kannada|marathi|gujarati|bengali|odia|malayalam|nepali)|language)\b|अनुवाद/i],
+		['content_question', /\b(meaning|shloka|sloka|verse|chapter|commentary|explain)\b|श्लोक|अध्याय|अर्थ/i],
+	],
+	billing_finance: [
+		['refund_status', /\b(refund|money back)\b|रिफंड|पैसे वापस/i],
+		['invoice_gst', /\b(invoice|gst|gstin|tax bill|bill)\b/i],
+		['bank_details', /\b(bank details|account (number|details)|ifsc|how (can|do) i pay|payment (method|mode)|upi id)\b/i],
+		['payment_confirmation', /\b(paid|payment|transferred|utr|receipt|screenshot)\b|भुगतान/i],
+	],
+	vendor_partner: [
+		['rate_revision', /\b(rate revision|revised rates?|price increase|new rates?)\b/i],
+		['supplier_invoice', /\b(invoice|outstanding|payment due|pending payment|ledger)\b/i],
+		['purchase_order', /\b(purchase order|po (no|number)|\bpo\b|order confirmation)\b/i],
+	],
+	people_hr: [['job_application', /\b(apply|application|resume|cv|vacancy|job|career|interview)\b|नौकरी|आवेदन/i]],
+	internal: [['stock_reprint', /\b(stock|reprint|print run|production|inventory)\b|स्टॉक|पुनर्मुद्रण/i]],
+	events_marketing: [
+		['book_fair', /\b(book fair|pustak mela|exhibition|stall)\b|पुस्तक मेला|प्रदर्शनी/i],
+		['media_request', /\b(media|journalist|interview|documentary|press|tv|channel|newspaper)\b/i],
+		['newsletter', /\b(newsletter|unsubscribe|promotion|webinar)\b/i],
+	],
+	notifications: [
+		['payment_gateway', /\b(razorpay|payu|paytm|ccavenue|settlement|transaction|payment received)\b/i],
+		['courier_updates', /\b(india post|speed post|courier|shipment|delivered|out for delivery|consignment)\b/i],
+	],
+};
+
+/** The subgroup for a thread, from its group and text (rules engine; the AI picks it directly). */
+export function guessSubcategory(group: BusinessCategory, text: string): string {
+	for (const [key, re] of SUB_RULES[group] || []) if (re.test(text)) return key;
+	return normaliseSubcategory(group, '');
+}
+
 const P = (what: string) => `[[provide: ${what}]]`;
 
 /** A complete reply in the customer's language; anything only the team can know is a [[provide: …]] placeholder. */
@@ -394,6 +470,7 @@ export function heuristicAnalyse(input: ThreadInput): Analysis {
 	if (proposal && !internalSummary) summaryParts.push(`Proposal stage: ${proposal.stage.replace(/_/g, ' ')}${proposal.deadline ? `, deadline ${proposal.deadline}` : ''}.`);
 	return {
 		business_category,
+		subcategory: guessSubcategory(business_category, inboundText),
 		proposal,
 		summary: summaryParts.filter(Boolean).join(' '),
 		sentiment,

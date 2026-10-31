@@ -82,7 +82,7 @@ export async function upsertDraft(conv: any, needsReply: boolean, body: string, 
 
 const DRAFT_COLS = `d.id, d.conversation_id, d.body, d.edited, d.status, d.to_addresses, d.cc_addresses, d.subject, d.model, d.generated_at, d.updated_at,
 	d.sent_at, d.last_error, d.send_mailbox_id, m.address as send_from, m.provider as send_provider,
-	c.subject as conv_subject, c.rag, c.urgency, c.sentiment, c.summary, c.last_inbound_at, c.business_category, c.awaiting_reply,
+	c.subject as conv_subject, c.rag, c.urgency, c.sentiment, c.summary, c.last_inbound_at, c.business_category, c.subcategory, c.awaiting_reply,
 	cu.name as customer_name, cu.tier as customer_tier, su.full_name as sent_by_name, uu.full_name as updated_by_name`;
 const DRAFT_JOIN = `from reply_drafts d join conversations c on c.id=d.conversation_id left join customers cu on cu.id=c.customer_id
 	left join mailboxes m on m.id=d.send_mailbox_id left join users su on su.id=d.sent_by left join users uu on uu.id=d.updated_by`;
