@@ -72,19 +72,34 @@ async function logUsage(orgId: number | null, model: string, inTok: number, outT
 }
 
 async function anthropicCall(body: any) {
-	const res = await fetch('https://api.anthropic.com/v1/messages', {
-		method: 'POST',
-		headers: {
-			'x-api-key': process.env.ANTHROPIC_API_KEY!,
-			'anthropic-version': '2023-06-01',
-			'content-type': 'application/json',
-		},
-		body: JSON.stringify(body),
-		signal: AbortSignal.timeout(60_000),
-	});
-	const data: any = await res.json();
-	if (!res.ok) throw new Error(`Anthropic ${res.status}: ${data?.error?.message || 'error'}`);
-	return data;
+	await pace();
+	for (let i = 0; i < 4; i++) {
+		const res = await fetch(`${(process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com').replace(/\/$/, '')}/v1/messages`, {
+			method: 'POST',
+			headers: {
+				'x-api-key': process.env.ANTHROPIC_API_KEY!,
+				'anthropic-version': '2023-06-01',
+				'content-type': 'application/json',
+			},
+			body: JSON.stringify(body),
+			signal: AbortSignal.timeout(120_000),
+		});
+		const data: any = await res.json().catch(() => ({}));
+		if (res.status === 429 || res.status === 529 || res.status >= 500) {
+			const retry = Number(res.headers.get('retry-after') || 0);
+			if (retry > 60) throw new QuotaError(`Claude ${res.status}: ${data?.error?.message || 'rate limited'}`, retry);
+			await new Promise((r) => setTimeout(r, Math.max(2000 * 2 ** i, retry * 1000)));
+			continue;
+		}
+		if (!res.ok) {
+			const msg = data?.error?.message || 'error';
+			// out of credit or spend limit reached: pause instead of failing every thread
+			if (res.status === 400 && /credit balance|spend limit|billing/i.test(msg)) throw new QuotaError(`Claude: ${msg}`, 3600);
+			throw new Error(`Claude ${res.status}: ${msg}`);
+		}
+		return data;
+	}
+	throw new QuotaError('Claude kept returning rate-limit or overload errors', 120);
 }
 
 /**
@@ -101,7 +116,7 @@ export class QuotaError extends Error {
 let pauseCache = { until: 0, at: 0 };
 async function aiPausedUntil(): Promise<number> {
 	if (Date.now() - pauseCache.at < 20_000) return pauseCache.until;
-	const r = await q<any>('select paused_until from ai_state where id=1').catch(() => []);
+	const r = await q<any>('select paused_until from ai_state where id=1 and (provider is null or provider=$1)', [aiProvider()]).catch(() => []);
 	pauseCache = { until: r[0]?.paused_until ? new Date(r[0].paused_until).getTime() : 0, at: Date.now() };
 	return pauseCache.until;
 }
@@ -117,7 +132,7 @@ async function recordAiError(e: any) {
 			until = new Date(now.getTime() + (next.getTime() - pt.getTime()));
 		} else until = new Date(Date.now() + Math.max(60, e.retryAfterSecs) * 1000);
 	}
-	await q(`update ai_state set last_error=$1, last_error_at=now(), paused_until=coalesce($2, paused_until) where id=1`, [String(e.message).slice(0, 500), until]).catch(() => {});
+	await q(`update ai_state set last_error=$1, last_error_at=now(), paused_until=coalesce($2, paused_until), provider=$3 where id=1`, [String(e.message).slice(0, 500), until, aiProvider()]).catch(() => {});
 	if (until) pauseCache = { until: until.getTime(), at: Date.now() };
 }
 /** Optional pacing for free-tier quotas: AI_MIN_INTERVAL_MS=6000 ≈ 10 requests a minute. */
@@ -298,7 +313,7 @@ export async function analyseThread(input: ThreadInput, orgId: number): Promise<
 		if (provider === 'anthropic') {
 			const data = await anthropicCall({
 				model,
-				max_tokens: 2500,
+				max_tokens: 6000,
 				system: SYSTEM(input.orgName),
 				tools: [{ name: 'record_analysis', description: 'Record the structured analysis of the email conversation.', input_schema: ANALYSIS_SCHEMA }],
 				tool_choice: { type: 'tool', name: 'record_analysis' },

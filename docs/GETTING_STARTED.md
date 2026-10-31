@@ -96,6 +96,18 @@ Don't paste the service account JSON into Netlify. Netlify functions allow only 
 4. **Settings → Reply drafts:** add reference information the AI may use in replies, so fewer items are left in yellow. Examples: dispatch times, the Kalyan subscription fee, the bulk order process and refund timelines. Set the signature too.
 5. Colleagues just open the site and select **Sign in with Google**. Their inbox connects automatically. Make supervisors **manager** in **Admin → Users** so they see the combined view.
 
+### Using Claude instead of Gemini
+
+Set these in Netlify, then redeploy. Nothing else changes: drafts, yellow items and Send work the same.
+
+| Key | Value |
+| --- | --- |
+| `AI_PROVIDER` | `anthropic` |
+| `ANTHROPIC_API_KEY` | from console.anthropic.com → API keys |
+| `ANTHROPIC_MODEL` | `claude-sonnet-5-5` (best drafts) or `claude-haiku-5-5` (faster, cheaper) |
+
+Threads already analysed keep their analysis. New mail, and threads that fell back to the rules engine, are analysed by Claude. Use **Rewrite** on a draft, or **Re-analyse** on a thread, to redo one with Claude.
+
 ## Step 8. Using reply drafts
 
 * **Replies to send** lists every email waiting on an answer, with a complete reply already drafted in the language the reader wrote in.

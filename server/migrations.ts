@@ -472,4 +472,8 @@ create table if not exists ai_state (
 );
 insert into ai_state (id) values (1) on conflict do nothing;
 ` },
+{ id: '007_ai_state_provider', sql: String.raw`
+-- a quota pause belongs to one provider, so switching provider is not held back by the old one's pause
+alter table ai_state add column if not exists provider text;
+` },
 ];
