@@ -118,6 +118,14 @@ const mt = await matchReference(orgId, 'Please send 20 copies of Shrimad Bhagava
 assert.ok(mt.some((m) => /Tattva Vivechani/.test(m.title) && /₹250/.test(m.text)), `book matched: ${JSON.stringify(mt)}`);
 assert.ok(mt.some((m) => m.kind === 'faq'), 'faq matched');
 assert.ok(!mt.some((m) => /Ramcharitmanas/.test(m.title)), 'unrelated book not matched');
+await importCsv(orgId, 'book', 'code,title,language,price,in_stock,author,binding\n26,Shrimad Bhagavat Mahapuran Part 1,Hindi,450,yes,Vedvyas,Hardbound\n', false);
+const byCode = await matchReference(orgId, 'Shrimad Bhagwat Mahapuran khand dono code 26 bhejiye');
+assert.ok(byCode.some((m) => /Mahapuran/.test(m.title) && /binding Hardbound/.test(m.text)), `short book code and extra columns: ${JSON.stringify(byCode)}`);
+assert.ok((await matchReference(orgId, 'पुस्तक कोड 26 उपलब्ध है?')).some((m) => /Mahapuran/.test(m.title)), 'Hindi code cited');
+
+// cold marketing is not waiting for a reply
+const promo = heuristicAnalyse(input('Grow your business with our digital marketing and SEO services. Free listing for your books. Click to unsubscribe.', "Don't Just Advertise. Create Opportunities for Growth."));
+assert.equal(promo.requires_reply, false);
 
 // threads analysed before subgroups existed are back-filled; the report has headings and subheadings
 await q('update conversations set subcategory=null where id=$1', [waiting.id]);

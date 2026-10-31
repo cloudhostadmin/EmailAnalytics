@@ -35,6 +35,8 @@ export default function Layout() {
 	const { filters, set: setFilters } = useFilters();
 	const myday = useQuery({ queryKey: ['my-day'], queryFn: () => api('/views/my-day'), refetchInterval: 120_000 });
 	const alerts = useQuery({ queryKey: ['alert-counts'], queryFn: () => api('/alerts?status=open'), refetchInterval: 60_000 });
+	const sys = useQuery({ queryKey: ['system-status'], queryFn: () => api('/system/status'), refetchInterval: 120_000, enabled: can('manager') });
+	const aiPaused = sys.data?.progress?.ai_paused_until && new Date(sys.data.progress.ai_paused_until) > new Date();
 	const summary = useQuery({ queryKey: ['nav-summary'], queryFn: () => api('/dashboard/summary'), refetchInterval: 120_000 });
 	const drafts = useQuery({ queryKey: ['nav-drafts', filters.view], queryFn: () => api(`/drafts?status=draft${filters.view === 'me' ? '&view=me' : ''}`), refetchInterval: 120_000 });
 	const badge = (b?: string) => {
@@ -128,6 +130,11 @@ export default function Layout() {
 					</div>
 				</header>
 				<main className="content">
+					{aiPaused && (
+						<div className="ai-banner" role="alert">
+							<b>Claude analysis is paused</b> until {new Date(sys.data.progress.ai_paused_until).toLocaleTimeString()}: {sys.data.progress.ai_last_error}. New mail is sorted by the rules engine meanwhile. <a href="/admin/processing">Processing status</a>
+						</div>
+					)}
 					<Outlet />
 				</main>
 			</div>

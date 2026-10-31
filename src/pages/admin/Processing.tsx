@@ -1,7 +1,10 @@
-import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '../../contexts/AuthContext';
+import { useToast } from '../../contexts/ToastContext';
 import { Link } from 'react-router-dom';
 import { api } from '../../api/client';
-import { Card, Kpi, Loader, PageHead } from '../../components/ui';
+import { Card, Kpi, Loader, Modal, PageHead } from '../../components/ui';
 import { COLORS, ago, fmtDate, fmtDateTime } from '../../lib/format';
 
 const n = (v: number | null | undefined) => (v ?? 0).toLocaleString('en-IN');
@@ -69,6 +72,8 @@ export default function Processing() {
 				</table>
 			</Card>
 
+			<OldUnanswered />
+
 			<Card className="mb-16" accent={COLORS.blue} title="Mailboxes" flush>
 				<div className="table-wrap">
 					<table className="table">
@@ -118,5 +123,41 @@ export default function Processing() {
 				</Card>
 			</div>
 		</>
+	);
+}
+
+/** Months of history arrive with thousands of threads nobody answered; this takes them off the waiting lists. */
+function OldUnanswered() {
+	const { can } = useAuth();
+	const toast = useToast();
+	const qc = useQueryClient();
+	const [days, setDays] = useState(45);
+	const [confirm, setConfirm] = useState(false);
+	const preview = useQuery({ queryKey: ['old-unanswered', days], queryFn: () => api(`/system/old-unanswered?days=${days}`), enabled: can('manager') });
+	const run = useMutation({
+		mutationFn: () => api('/system/old-unanswered', { body: { days } }),
+		onSuccess: (r: any) => { setConfirm(false); qc.invalidateQueries(); toast(`${r.threads.toLocaleString('en-IN')} old threads no longer counted as waiting`); },
+		onError: (e: any) => toast(e.message, 'error'),
+	});
+	if (!can('manager')) return null;
+	const n = preview.data?.threads || 0;
+	return (
+		<Card className="mb-16" accent={COLORS.amber} title="Old unanswered threads"
+			sub="History read from Gmail includes threads nobody answered months ago. They inflate Awaiting reply, Replies to send and alerts. Taking them off the waiting lists does not delete anything; a new message from the reader puts the thread back.">
+			<div className="row wrap" style={{ gap: 12 }}>
+				<span className="small">Reader wrote last more than</span>
+				<select className="input" style={{ width: 110 }} value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label="Days">
+					{[14, 30, 45, 60, 90].map((d) => <option key={d} value={d}>{d} days</option>)}
+				</select>
+				<span className="small">ago: <b>{n.toLocaleString('en-IN')}</b> threads, {(preview.data?.drafts || 0).toLocaleString('en-IN')} drafts</span>
+				<button className="btn" disabled={!n || run.isPending} onClick={() => setConfirm(true)}>Mark as no reply needed</button>
+			</div>
+			{confirm && (
+				<Modal title="Mark old threads as no reply needed?" onClose={() => setConfirm(false)}
+					footer={<><button className="btn" onClick={() => setConfirm(false)}>Cancel</button><button className="btn primary" onClick={() => run.mutate()} disabled={run.isPending}>{run.isPending ? 'Working' : `Yes, ${n.toLocaleString('en-IN')} threads`}</button></>}>
+					<p className="small">{n.toLocaleString('en-IN')} threads where the reader last wrote more than {days} days ago will stop counting as waiting. Their drafts move to Dismissed and their alerts are resolved. The threads and emails stay in Gita Mail, and any new message from the reader brings the thread back.</p>
+				</Modal>
+			)}
+		</Card>
 	);
 }

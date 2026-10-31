@@ -24,6 +24,7 @@ const POS: [RegExp, number][] = [
 	[/\b(thanks|thank you|appreciate|great|good|happy|helpful|smooth|on time|resolved|sorted|blessings)\b/i, 0.8],
 	[/धन्यवाद|आभार|प्रसन्न|बहुत अच्छा/i, 1.5],
 ];
+const PROMO = /\b(unsubscribe|opt[- ]?out|view (this|it) in (your|a) browser|free listing|list your business|grow your (business|sales)|boost your (sales|business)|seo services|digital marketing|create opportunities|limited[- ]time offer|special offer|book your (stall|space)|visitor registration|register (now|today)|webinar|expo 20\d\d|second[- ]hand|used machine|policy violation notice|anyone can edit your|justdial|indiamart|tradeindia|bulk sms|whatsapp marketing)\b/i;
 const NEGATION = /\b(not|no|never|isn't|wasn't|aren't|don't|didn't)\s+(\w+\s+)?$/i;
 
 // Hindi words have no \b boundaries in JS regex, so they are matched as plain alternatives
@@ -430,7 +431,9 @@ export function heuristicAnalyse(input: ThreadInput): Analysis {
 	// a short "thanks / ok / received" closing note does not need a reply
 	const ackOnly = lastIsInbound && lastMsg.body.trim().length < 160 && !/\?/.test(lastMsg.body) &&
 		/^\s*(hi[^\n]*\n+)?\s*(ok|okay|great|perfect|thanks|thank you|many thanks|cheers|noted|received|much appreciated|brilliant|lovely|excellent|that's great|sounds good)\b/i.test(lastMsg.body);
-	const awaiting = lastIsInbound && !ackOnly && !input.isAutomated;
+	// cold marketing and sales pitches do not need an answer
+	const promo = PROMO.test(`${msgs[0]?.subject || ''}\n${(msgs[0]?.body || '').slice(0, 3000)}`) && outbound.length === 0;
+	const awaiting = lastIsInbound && !ackOnly && !input.isAutomated && !promo;
 	const ent = entities(all);
 
 	const primary = categories.find((c) => c !== 'complaint') || categories[0];

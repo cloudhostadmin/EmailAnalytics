@@ -71,6 +71,12 @@ export async function importCsv(orgId: number, kind: RefKind, csv: string, repla
 		const code = get('code') || null;
 		const data: Record<string, string> = {};
 		if (kind === 'book') for (const k of ['language', 'price', 'in_stock']) if (get(k)) data[k] = get(k);
+		// any other column (author, edition, pages, binding, size, ebook link, branch…) is kept and given to the AI as is
+		header.forEach((h, i) => {
+			const key = h.trim().toLowerCase();
+			if (!key || (Object.values(ix) as number[]).includes(i) || !String(r[i] ?? '').trim()) return;
+			if (Object.keys(data).length < 25) data[key.slice(0, 40)] = String(r[i]).trim().slice(0, 300);
+		});
 		const keywords = get('keywords').split(/[;|]/).map((x) => x.trim().toLowerCase()).filter(Boolean).slice(0, 20);
 		const body = get('body').slice(0, 2000);
 		const res = code
@@ -129,7 +135,8 @@ async function loadItems(orgId: number): Promise<Item[]> {
 const describe = (i: Item) => {
 	if (i.kind !== 'book') return i.body;
 	const d = i.data || {};
-	return [d.language && `language ${d.language}`, d.price && `price ₹${String(d.price).replace(/^₹\s*/, '')}`, d.in_stock && `in stock: ${d.in_stock}`, i.code && `code ${i.code}`, i.body]
+	const extra = Object.entries(d).filter(([k]) => !['language', 'price', 'in_stock'].includes(k)).map(([k, v]) => `${k.replace(/_/g, ' ')} ${v}`);
+	return [i.code && `book code ${i.code}`, d.language && `language ${d.language}`, d.price && `price ₹${String(d.price).replace(/^₹\s*/, '')}`, d.in_stock && `in stock: ${d.in_stock}`, ...extra, i.body]
 		.filter(Boolean).join('; ');
 };
 
@@ -139,11 +146,15 @@ export async function matchReference(orgId: number, text: string, max = 8) {
 	if (!items.length) return [];
 	const t = ` ${norm(text)} `;
 	const words = new Set(tokens(text));
+	// readers quote Gita Press book codes, often short: "code 26", "book no 1388", "कोड 1362"
+	const cited = new Set([...text.matchAll(/(?:code|cod|book\s*no\.?|no\.|number|item|#|कोड|क्रमांक|पुस्तक\s*संख्या|पुस्तक\s*सं\.?)\s*[:#-]?\s*(\d{1,5}(?:\s*(?:,|and|&|और)\s*\d{1,5})*)/gi)]
+		.flatMap((m) => m[1].split(/\s*(?:,|and|&|और)\s*/)).map((x) => x.trim().replace(/^0+/, '')));
 	const scored: [number, Item][] = [];
 	for (const i of items) {
 		let s = 0;
 		if (i.t.length >= 4 && t.includes(` ${i.t} `)) s += 10; // the whole title appears
-		if (i.code && i.code.length >= 3 && new RegExp(`\\b${i.code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(text)) s += 8;
+		if (i.kind === 'book' && i.code && cited.has(i.code.replace(/^0+/, ''))) s += 12;
+		else if (i.code && i.code.length >= 3 && new RegExp(`\\b${i.code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(text)) s += 8;
 		for (const k of i.keywords) if (k.length >= 3 && t.includes(` ${norm(k)} `)) s += 4;
 		if (i.tk.length) {
 			const hit = i.tk.filter((w) => words.has(w)).length;

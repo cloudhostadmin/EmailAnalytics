@@ -1236,6 +1236,33 @@ r.get('/api/system/processing', async (ctx) => {
 	};
 });
 
+// threads read from months of history that nobody answered: take them off the waiting lists in one go
+r.get('/api/system/old-unanswered', async (ctx) => {
+	requireRole(ctx.user, 'manager');
+	const days = Math.max(7, Math.min(365, Number(ctx.query.get('days')) || 45));
+	return one<any>(
+		`select count(*)::int as threads, (select count(*) from reply_drafts d join conversations c on c.id=d.conversation_id
+		   where c.org_id=$1 and c.awaiting_reply and c.last_inbound_at < now() - make_interval(days => $2) and d.status='draft')::int as drafts
+		   from conversations c where c.org_id=$1 and c.awaiting_reply and c.status in ('open','in_progress') and c.last_inbound_at < now() - make_interval(days => $2)`,
+		[ctx.user!.orgId, days],
+	);
+});
+r.post('/api/system/old-unanswered', async (ctx) => {
+	requireRole(ctx.user, 'manager');
+	const days = Math.max(7, Math.min(365, Number(ctx.body?.days) || 45));
+	const ids = (await q<any>(
+		`update conversations set awaiting_reply=false, updated_at=now() where org_id=$1 and awaiting_reply and status in ('open','in_progress')
+		   and last_inbound_at < now() - make_interval(days => $2) returning id`,
+		[ctx.user!.orgId, days],
+	)).map((r) => r.id);
+	if (ids.length) {
+		await q(`update reply_drafts set status='dismissed', updated_at=now(), updated_by=$2 where conversation_id = any($1::bigint[]) and status='draft'`, [ids, ctx.user!.id]);
+		await q(`update alerts set status='resolved' where conversation_id = any($1::bigint[]) and status in ('open','acknowledged')`, [ids]).catch(() => {});
+	}
+	await audit(ctx, 'conversations.old_unanswered_cleared', 'conversation', null, { days, threads: ids.length });
+	return { threads: ids.length };
+});
+
 r.post('/api/system/demo', async (ctx) => {
 	requireRole(ctx.user, 'admin');
 	if (!demoEnabled()) throw new HttpError(400, 'Demo data is switched off on this site (set DEMO_DATA_ENABLED=true to allow it)');

@@ -1682,3 +1682,16 @@ textarea.input.tpl-edit {
 		padding-left: 20px;
 	}
 }
+.ai-banner {
+	background: #FFF4E5;
+	border: 1px solid #F49940;
+	color: var(--text);
+	border-radius: 10px;
+	padding: 10px 14px;
+	margin-bottom: 16px;
+	font-size: 14px;
+	a {
+		margin-left: 6px;
+		font-weight: 700;
+	}
+}

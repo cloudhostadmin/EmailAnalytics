@@ -46,6 +46,7 @@ Rules:
 - In the reply, NEVER guess a fact, decision, price, quantity, date, stock level, policy or commitment you cannot see in the emails or in the reference information. Instead insert a placeholder in exactly this form: [[provide: what the team must fill in]]. Example: a request for 5,000 copies of the Gita within 2 months becomes "[[provide: confirm whether 5,000 copies of the Bhagavad Gita can be supplied within 2 months]]" followed by the rest of the reply written so it reads correctly either way. Use as many placeholders as needed and keep each one short and specific. Never use square brackets inside a placeholder.
 - Use facts from the reference information when they answer the question, instead of a placeholder.
 - When no reply is needed (requires_reply false), suggested_reply is an empty string.
+- Unsolicited marketing and sales pitches (advertising, SEO or listing offers, machinery or equipment for sale, exhibition and trade-fair promotions, webinars, platform policy or account notices, bulk SMS) never need a reply: requires_reply false, business_category events_marketing (subgroup newsletter) or vendor_partner (subgroup new_vendor).
 - subcategory: pick exactly one subgroup key from the list for the business_category you chose:
 ${taxonomyForPrompt()}
 - Reply templates: when a default template is given for the subgroup you chose, follow its structure, order and wording closely, translating it if the customer wrote in another language. Replace {{name}}, {{order_ref}}, {{book}} and similar fields with facts from the emails, or with a [[provide: …]] placeholder when the fact is not known. Keep the template's own [[provide: …]] placeholders unless the emails or reference information answer them. Answer anything the customer asked that the template does not cover.
@@ -100,6 +101,8 @@ async function anthropicCall(body: any) {
 		}
 		if (!res.ok) {
 			const msg = data?.error?.message || 'error';
+			// a wrong or revoked key fails every call: pause and say so, instead of failing thousands of threads one by one
+			if (res.status === 401 || res.status === 403) throw new QuotaError(`Claude rejected the API key (${res.status}: ${msg}). Check ANTHROPIC_API_KEY in Netlify, then redeploy.`, 900);
 			// out of credit or spend limit reached: pause instead of failing every thread
 			if (res.status === 400 && /credit balance|spend limit|billing/i.test(msg)) throw new QuotaError(`Claude: ${msg}`, 3600);
 			throw new Error(`Claude ${res.status}: ${msg}`);
@@ -195,6 +198,7 @@ async function geminiCall(opts: { system: string; prompt: string; schema?: objec
 	};
 	let { res, data } = await attempt(true);
 	if (!res.ok && res.status === 400 && opts.schema) ({ res, data } = await attempt(false));
+	if (res.status === 401 || res.status === 403) throw new QuotaError(`Gemini rejected the API key (${res.status}: ${data?.error?.message || 'error'}). Check GEMINI_API_KEY in Netlify.`, 900);
 	if (!res.ok) throw new Error(`Gemini ${res.status}: ${data?.error?.message || 'error'}`);
 	const cand = data.candidates?.[0];
 	const text = (cand?.content?.parts || []).filter((p: any) => !p.thought).map((p: any) => p.text || '').join('');
