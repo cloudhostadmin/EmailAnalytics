@@ -27,7 +27,7 @@ import { loadDemoData, clearDemoData, demoEnabled } from './demo';
 import { listTemplates, resetTemplate, updateTemplate } from './templates';
 import { deleteReference, importCsv, listReference, matchReference, TEMPLATES_CSV, type RefKind } from './reference';
 import { normaliseSubcategory, subgroupOf, taxonomyTree } from './ai/taxonomy';
-import { dismissDraft, getDraft, getDraftForConversation, listDrafts, saveDraft, sendDraft } from './drafts';
+import { dismissDraft, fillDraft, getDraft, getDraftForConversation, listDrafts, saveDraft, sendDraft } from './drafts';
 import { BUSINESS_CATEGORIES, BUSINESS_LABELS, CATEGORIES, CATEGORY_LABELS, PROPOSAL_STAGES, type BusinessCategory } from './ai/types';
 import type { MailboxRow } from './connectors/types';
 
@@ -369,15 +369,52 @@ r.post('/api/conversations/:id/notes', async (ctx) => {
 
 // ── Reply drafts: stay in the app until a person presses Send ─────────────
 r.get('/api/drafts', async (ctx) => {
-	const f = await convFilter(ctx.user!, ctx.query, { ignoreDates: true });
+	const qs = new URLSearchParams(ctx.query);
+	if (!qs.get('audience')) qs.set('audience', 'all');
 	const status = ['draft', 'sent', 'dismissed', 'replied_elsewhere'].includes(ctx.query.get('status') || '') ? ctx.query.get('status')! : 'draft';
-	const rows = await listDrafts(f.where.join(' and '), f.params, status);
+	const add = (w: { where: string[]; params: unknown[] }, sql: (n: string) => string, v: unknown) => { w.params.push(v); w.where.push(sql(`$${w.params.length}`)); };
+	// counts beside the quick filters (rating, received, status) ignore those filters, so they show what each choice would give
+	const noQuick = new URLSearchParams(qs);
+	noQuick.delete('rag');
+	const fq = await convFilter(ctx.user!, noQuick, { ignoreDates: true });
+	const base = { where: [...fq.where], params: [...fq.params] };
+	const f = await convFilter(ctx.user!, qs, { ignoreDates: true });
+	const waited = Number(ctx.query.get('waitingDays'));
+	if (waited > 0) add(f, (n) => `c.last_inbound_at > now() - make_interval(days => ${n}::int)`, waited);
+	const urg = (ctx.query.get('urgency') || '').split(',').filter((u) => ['low', 'medium', 'high', 'critical'].includes(u));
+	if (urg.length) add(f, (n) => `c.urgency = any(${n})`, urg);
+	const ready = ctx.query.get('ready');
+	if (ready === 'yes') f.where.push(`d.body !~* '\\[\\[\\s*provide\\s*:'`);
+	if (ready === 'no') f.where.push(`d.body ~* '\\[\\[\\s*provide\\s*:'`);
+	const text = (ctx.query.get('q') || '').trim();
+	const search = (n: string) => `(c.subject ilike ${n} or d.body ilike ${n} or exists (select 1 from customers k where k.id=c.customer_id and k.name ilike ${n}) or exists (select 1 from unnest(d.to_addresses) a where a ilike ${n}))`;
+	if (text) { add(f, search, `%${text}%`); add(fq, search, `%${text}%`); }
+	const sort = ctx.query.get('sort') || 'priority';
+	const rows = await listDrafts(f.where.join(' and '), f.params, status, sort);
+	const total = await one<any>(`select count(*)::int n from reply_drafts d join conversations c on c.id=d.conversation_id where ${f.where.join(' and ')} and d.status=$${f.params.length + 1}`, [...f.params, status]);
 	const counts = await one<any>(
-		`select count(*) filter (where d.status='draft')::int as draft, count(*) filter (where d.status='sent' and d.sent_at > now() - interval '7 days')::int as sent_week
-		   from reply_drafts d join conversations c on c.id=d.conversation_id where ${f.where.join(' and ')}`,
-		f.params,
+		`select count(*) filter (where d.status='draft')::int as draft, count(*) filter (where d.status='sent' and d.sent_at > now() - interval '7 days')::int as sent_week,
+		        count(*) filter (where d.status='sent')::int as sent
+		   from reply_drafts d join conversations c on c.id=d.conversation_id where ${base.where.join(' and ')}`,
+		base.params,
 	);
-	return { rows, counts };
+	const facets = await one<any>(
+		`select count(*)::int as total,
+		        count(*) filter (where d.body !~* '\\[\\[\\s*provide\\s*:')::int as ready,
+		        count(*) filter (where c.rag='red')::int as red, count(*) filter (where c.rag='amber')::int as amber, count(*) filter (where c.rag='green')::int as green,
+		        count(*) filter (where c.last_inbound_at > now() - interval '1 day')::int as today,
+		        count(*) filter (where c.last_inbound_at > now() - interval '7 days')::int as week,
+		        count(*) filter (where c.last_inbound_at <= now() - interval '30 days')::int as older
+		   from reply_drafts d join conversations c on c.id=d.conversation_id
+		  where ${fq.where.join(' and ')} and d.status='draft'`,
+		fq.params,
+	);
+	const byGroup = await q<any>(
+		`select c.business_category as k, count(*)::int as n from reply_drafts d join conversations c on c.id=d.conversation_id
+		  where ${fq.where.join(' and ')} and d.status='draft' group by 1 order by 2 desc`,
+		fq.params,
+	);
+	return { rows, total: total?.n || 0, counts, facets: { ...facets, groups: byGroup } };
 });
 r.get('/api/conversations/:id/draft', async (ctx) => {
 	const id = Number(ctx.params.id);
@@ -400,6 +437,13 @@ r.post('/api/drafts/:id/send', async (ctx) => {
 	const d = await draftAccess(ctx);
 	const res = await sendDraft(ctx, ctx.user!, d.id, ctx.body || {});
 	kickWorker(res.mailboxId).catch(() => {}); // pull the sent message into the thread
+	return res;
+});
+r.post('/api/drafts/:id/fill', async (ctx) => {
+	requireRole(ctx.user, 'analyst');
+	const d = await draftAccess(ctx);
+	const res = await fillDraft(ctx.user!, d.id, ctx.body?.answers || [], ctx.body?.rewrite !== false);
+	await audit(ctx, 'reply.filled', 'reply_draft', d.id, { filled: res.filled, remaining: res.remaining, how: res.how });
 	return res;
 });
 r.post('/api/drafts/:id/dismiss', async (ctx) => {

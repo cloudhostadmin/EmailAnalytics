@@ -22,6 +22,7 @@ export default function ConversationDetail() {
 	const opts = useFilterOptions();
 	const [note, setNote] = useState('');
 	const [showDupes, setShowDupes] = useState(false);
+	const [newestFirst, setNewestFirst] = useState(true);
 	const { data, isLoading, error } = useQuery({ queryKey: ['conversation', id], queryFn: () => api(`/conversations/${id}`) });
 	const draftQ = useQuery({ queryKey: ['draft', id], queryFn: () => api(`/conversations/${id}/draft`) });
 	const refresh = () => {
@@ -43,7 +44,8 @@ export default function ConversationDetail() {
 	if (isLoading) return <Loader />;
 	if (error || !data) return <Empty text={(error as any)?.message || 'Conversation not found'} />;
 	const c = data.conversation;
-	const emails = data.emails.filter((e: any) => showDupes || !e.is_duplicate);
+	const inOrder = data.emails.filter((e: any) => showDupes || !e.is_duplicate);
+	const emails = newestFirst ? inOrder.slice().reverse() : inOrder;
 	const dupes = data.emails.filter((e: any) => e.is_duplicate).length;
 	const ent = c.entities || {};
 	const entityGroups: [string, string[]][] = [
@@ -53,7 +55,7 @@ export default function ConversationDetail() {
 	return (
 		<>
 			<button className="btn ghost sm mb-8" onClick={() => nav(-1)}><MdArrowBack /> Back</button>
-			<div className="page-head">
+			<div className="page-head detail-head">
 				<div className="grow">
 					<div className="row wrap mb-8">
 						<span className="badge" style={{ background: (BUSINESS_COLORS[c.business_category] || '#ccc') + '22', color: 'var(--text)' }}>{bizLabel(c.business_category)}{subLabel(c.business_category, c.subcategory) ? ` · ${subLabel(c.business_category, c.subcategory)}` : ''}</span>
@@ -98,6 +100,12 @@ export default function ConversationDetail() {
 
 			<div className="grid g-2-1">
 				<div className="col gap-16">
+					{draftQ.data?.draft && ['draft', 'sent'].includes(draftQ.data.draft.status) && (
+						<Card title={<h2><span className="kw">Reply</span> {draftQ.data.draft.status === 'sent' ? 'sent' : 'draft'}</h2>} accent={COLORS.pink}
+							sub="Kept here until you press Send, then sent from Gmail in this thread. The conversation is below.">
+							<DraftEditor draft={draftQ.data.draft} compact />
+						</Card>
+					)}
 					<Card accent={COLORS.pink}>
 						<div className="summary-box" style={{ border: 0, padding: 0 }}>
 							<div className="lbl"><MdAutoAwesome /> AI summary</div>
@@ -111,8 +119,11 @@ export default function ConversationDetail() {
 						<div className="faint xs mt-8">Model: {c.analysis_model || 'n/a'} · analysed {ago(c.analysed_at)}</div>
 					</Card>
 
-					<Card title={`Email thread (${data.emails.length - dupes})`} sub={dupes ? `${dupes} duplicate copies from other mailboxes were excluded from analysis` : 'Oldest first'}
-						actions={dupes ? <label className="row small"><input type="checkbox" checked={showDupes} onChange={(e) => setShowDupes(e.target.checked)} /> Show duplicates</label> : null}>
+					<Card title={`Email thread (${data.emails.length - dupes})`} sub={dupes ? `${dupes} duplicate copies from other mailboxes were excluded from analysis` : newestFirst ? 'Newest first' : 'Oldest first'}
+						actions={<div className="row small" style={{ gap: 12 }}>
+							<button className="btn ghost sm" onClick={() => setNewestFirst(!newestFirst)}>{newestFirst ? 'Show oldest first' : 'Show newest first'}</button>
+							{dupes ? <label className="row small"><input type="checkbox" checked={showDupes} onChange={(e) => setShowDupes(e.target.checked)} /> Show duplicates</label> : null}
+						</div>}>
 						<div className="thread">
 							{emails.map((e: any) => (
 								<div key={e.id} className={`msg ${e.direction} ${e.is_duplicate ? 'duplicate' : ''}`}>
@@ -218,12 +229,6 @@ export default function ConversationDetail() {
 						) : <div className="faint small">No action items found</div>}
 					</Card>
 
-					{draftQ.data?.draft && ['draft', 'sent'].includes(draftQ.data.draft.status) && (
-						<Card title={<h2><span className="kw">Reply</span> {draftQ.data.draft.status === 'sent' ? 'sent' : 'draft'}</h2>} accent={COLORS.pink}
-							sub="Kept here until you press Send, then sent from Gmail in this thread">
-							<DraftEditor draft={draftQ.data.draft} compact />
-						</Card>
-					)}
 
 					{entityGroups.length > 0 && (
 						<Card title="Key references" accent={COLORS.teal}>

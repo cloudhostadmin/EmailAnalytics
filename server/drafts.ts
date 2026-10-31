@@ -89,10 +89,18 @@ const DRAFT_JOIN = `from reply_drafts d join conversations c on c.id=d.conversat
 
 const withMeta = (d: any) => d && { ...d, placeholders: placeholders(d.body), canSend: gmailSendEnabled() && !!d.send_mailbox_id };
 
-export async function listDrafts(where: string, params: unknown[], status: string) {
+const DRAFT_SORTS: Record<string, string> = {
+	priority: `case c.rag when 'red' then 0 when 'amber' then 1 else 2 end, c.last_inbound_at desc nulls last`,
+	newest: 'c.last_inbound_at desc nulls last',
+	oldest: 'c.last_inbound_at asc nulls last',
+	ready: `case when d.body ~* '\\[\\[\\s*provide\\s*:' then 1 else 0 end, c.last_inbound_at desc nulls last`,
+	sent: 'd.sent_at desc nulls last',
+};
+export async function listDrafts(where: string, params: unknown[], status: string, sort = 'priority') {
+	const order = status === 'sent' ? DRAFT_SORTS.sent : DRAFT_SORTS[sort] || DRAFT_SORTS.priority;
 	const rows = await q<any>(
-		`select ${DRAFT_COLS} ${DRAFT_JOIN} where ${where} and d.status = $${params.length + 1}
-		 order by case c.rag when 'red' then 0 when 'amber' then 1 else 2 end, c.last_inbound_at asc nulls last limit 200`,
+		`select ${DRAFT_COLS}, c.urgency as conv_urgency, c.mailbox_ids ${DRAFT_JOIN} where ${where} and d.status = $${params.length + 1}
+		 order by ${order} limit 200`,
 		[...params, status],
 	);
 	return rows.map(withMeta);
@@ -161,4 +169,63 @@ export async function dismissDraft(ctx: any, user: SessionUser, id: number) {
 	await q(`update reply_drafts set status='dismissed', updated_at=now(), updated_by=$3 where id=$1 and org_id=$2 and status='draft'`, [id, user.orgId, user.id]);
 	await audit(ctx, 'reply.dismissed', 'reply_draft', id);
 	return { success: true };
+}
+
+/**
+ * Staff answer the yellow items in small boxes; the answers go into the draft and the AI rewrites the
+ * email so it reads naturally (in the reader's language), keeping anything still unanswered as yellow.
+ * Without the AI, the answers are put in place as typed.
+ */
+export async function fillDraft(user: SessionUser, id: number, answers: { item: string; value: string }[], rewrite = true) {
+	const d = await one<any>('select * from reply_drafts where id=$1 and org_id=$2', [id, user.orgId]);
+	if (!d) throw new HttpError(404, 'Draft not found');
+	if (d.status === 'sent') throw new HttpError(400, 'This reply has already been sent');
+	const given = (answers || []).map((a) => ({ item: String(a.item || '').trim(), value: String(a.value || '').trim().slice(0, 2000) })).filter((a) => a.item && a.value);
+	if (!given.length) throw new HttpError(400, 'Type at least one answer');
+	// 1. put each answer where its yellow item was
+	const used = new Set<number>();
+	let body: string = d.body.replace(PLACEHOLDER, (m: string, p: string) => {
+		const i = given.findIndex((a) => a.item.toLowerCase() === p.trim().toLowerCase());
+		if (i < 0) return m;
+		used.add(i);
+		return given[i].value;
+	});
+	if (!used.size) throw new HttpError(400, 'Those items are no longer in the draft. Reload and try again.');
+	const stillOpen = placeholders(body).length;
+	let model = 'inserted as typed';
+	// 2. let the AI smooth it into a finished email
+	if (rewrite) {
+		try {
+			const { askLLM, aiPaused } = await import('./ai/llm');
+			if (!(await aiPaused())) {
+				const conv = await one<any>('select subject, summary from conversations where id=$1', [d.conversation_id]);
+				const last = d.reply_to_email_id ? await one<any>('select from_name, body_clean, body_text from emails where id=$1', [d.reply_to_email_id]) : null;
+				const org = await getOrg(user.orgId);
+				const system = `You edit email replies for ${org.name}. Rewrite the draft reply below into a finished, courteous email that includes the facts the team has just supplied, so the sentences around each fact read naturally.
+Rules:
+- Keep the same language and script as the draft (Hindi stays Hindi in Devanagari; translate a supplied fact if it was typed in another language).
+- Keep the greeting, the overall structure and the signature block exactly as they are.
+- Use only facts in the draft, the supplied answers and the reader's email. Do not add promises, dates, prices or policies.
+- Keep every remaining [[provide: …]] item exactly as written, character for character.
+- If a supplied answer makes a sentence unnecessary (for example "not applicable"), remove that sentence.
+- Return only the email text: no preamble, no quotation marks, no markdown.`;
+				const prompt = [
+					`Subject: ${conv?.subject || d.subject}`,
+					last ? `Reader's latest email (from ${last.from_name || 'the reader'}):\n${String(last.body_clean || last.body_text || '').slice(0, 2500)}` : '',
+					`Facts supplied by the team:\n${given.filter((_a, k) => used.has(k)).map((a) => `- ${a.item}: ${a.value}`).join('\n')}`,
+					`Draft with the facts already inserted:\n${body}`,
+				].filter(Boolean).join('\n\n');
+				const out = (await askLLM(user.orgId, system, prompt))?.trim().replace(/^```[a-z]*\n?|```$/g, '').trim();
+				// accept only a plausible rewrite that kept the unanswered items
+				if (out && out.length > body.length * 0.4 && out.length < body.length * 3 && placeholders(out).length === stillOpen) {
+					body = out;
+					model = 'rewritten by AI';
+				}
+			}
+		} catch (e: any) {
+			console.error('[drafts] rewrite failed, keeping the answers as typed:', e.message);
+		}
+	}
+	await q(`update reply_drafts set body=$2, edited=true, status='draft', updated_at=now(), updated_by=$3 where id=$1`, [id, body, user.id]);
+	return { draft: await getDraft(id, user.orgId), filled: used.size, remaining: stillOpen, how: model };
 }

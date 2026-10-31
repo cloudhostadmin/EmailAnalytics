@@ -11,7 +11,7 @@ import { importCsv, matchReference, parseCsv } from '../server/reference';
 import { categoryReport } from '../server/views';
 import { heuristicAnalyse } from '../server/ai/heuristic';
 import { cleanBody, normalizeSubject, redactPII } from '../server/text';
-import { placeholders, sendDraft, bodyToHtml } from '../server/drafts';
+import { placeholders, sendDraft, bodyToHtml, fillDraft } from '../server/drafts';
 import { buildMime } from '../server/connectors/gmail';
 
 assert.equal(normalizeSubject('RE: Fwd: [EXT] Late delivery'), 'late delivery');
@@ -100,6 +100,13 @@ assert.ok(!(await one('select 1 from reply_drafts where conversation_id=$1', [co
 // Send is refused while yellow items remain
 const admin = await one<any>(`insert into users (org_id, email, full_name, role) values ($1,'t@gitapress.org','Test','admin') returning id`, [orgId]);
 await assert.rejects(sendDraft({}, { id: admin.id, orgId } as any, draft.id, {}), /Fill in the/);
+// answers typed in the small boxes go into the email; without the AI they are inserted as typed
+const items = [...new Set(placeholders(draft.body))];
+const filled = await fillDraft({ id: admin.id, orgId } as any, draft.id, [{ item: items[0], value: '3 November 2026' }]);
+assert.equal(filled.filled, 1);
+assert.ok(filled.draft.body.includes('3 November 2026'));
+assert.equal(placeholders(filled.draft.body).length, placeholders(draft.body).length - placeholders(draft.body).filter((p) => p === items[0]).length, 'every occurrence of that item answered');
+await assert.rejects(fillDraft({ id: admin.id, orgId } as any, draft.id, [{ item: 'not in the draft', value: 'x' }]), /no longer in the draft/);
 assert.ok(waiting.subcategory && SUBCATEGORIES[waiting.business_category as keyof typeof SUBCATEGORIES].some((x) => x.key === waiting.subcategory), `subgroup stored: ${waiting.business_category}/${waiting.subcategory}`);
 assert.match(draft.body, /^Respected Meena ji,/, 'rules-engine draft follows the default template');
 

@@ -4,7 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { Link } from 'react-router-dom';
 import { api } from '../../api/client';
-import { Card, Kpi, Loader, Modal, PageHead } from '../../components/ui';
+import { Card, Kpi, Loader, Modal, PageHead, Story } from '../../components/ui';
 import { COLORS, ago, fmtDate, fmtDateTime } from '../../lib/format';
 
 const n = (v: number | null | undefined) => (v ?? 0).toLocaleString('en-IN');
@@ -40,6 +40,15 @@ export default function Processing() {
 		<>
 			<PageHead kw="Processing" rest="status"
 				sub="How many emails have been read, how they were grouped into threads, and how far analysis and drafting have got. Refreshes every 30 seconds." />
+			<Story
+				head={<>{n(e.stored)} emails read into {n(t.total)} threads; {t.total ? Math.round((t.by_ai / t.total) * 100) : 0}% analysed by Claude so far.</>}
+				points={[
+					paused ? <>Claude is paused: {d.ai.last_error}</> : d.ai.last_error && d.ai.last_error_at && Date.now() - new Date(d.ai.last_error_at).getTime() < 3600_000 ? <>Last Claude error, {ago(d.ai.last_error_at)}: {d.ai.last_error}</> : null,
+					t.by_fallback ? <>{n(t.by_fallback)} threads were sorted by the rules engine while Claude was unavailable; recent and waiting ones are retried with Claude automatically.</> : null,
+					<>{n(t.awaiting)} threads are waiting for a reply and {n(t.drafts)} drafts are ready to check.</>,
+				]}
+				next={paused ? <>Fix the key or credit in Netlify (ANTHROPIC_API_KEY), then redeploy.</> : t.awaiting > 500 ? <>Clear old unanswered threads below so the waiting lists show current mail.</> : undefined}
+			/>
 			<div className="grid g-4 mb-16">
 				<Kpi label="Emails read" value={n(e.stored)} accent={COLORS.general} foot={`${n(e.last_30_days)} in the last 30 days`} />
 				<Kpi label="Threads" value={n(t.total)} accent={COLORS.navy} foot={`${n(t.last_30_days)} active in the last 30 days`} />

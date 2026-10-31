@@ -5,7 +5,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { MdSend, MdSave, MdRefresh, MdClose, MdContentCopy, MdArrowForward, MdInfoOutline } from 'react-icons/md';
+import { MdSend, MdSave, MdRefresh, MdClose, MdContentCopy, MdArrowForward, MdInfoOutline, MdAutoAwesome, MdEditNote } from 'react-icons/md';
 import { api } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
@@ -39,6 +39,8 @@ function fromDom(el: HTMLElement): string {
 }
 
 export const countPlaceholders = (body: string) => (body.match(PH) || []).length;
+/** the distinct yellow items in a draft, in order */
+export const placeholderList = (body: string) => [...new Set([...body.matchAll(PH)].map((m) => m[1].trim()))];
 
 export default function DraftEditor({ draft, onDone, compact }: { draft: any; onDone?: () => void; compact?: boolean }) {
 	const { can } = useAuth();
@@ -64,6 +66,10 @@ export default function DraftEditor({ draft, onDone, compact }: { draft: any; on
 	}, [draft.id, draft.body, draft.updated_at]);
 
 	const open = useMemo(() => countPlaceholders(body), [body]);
+	const items = useMemo(() => placeholderList(body), [body]);
+	const [answers, setAnswers] = useState<Record<string, string>>({});
+	useEffect(() => setAnswers({}), [draft.id]);
+	const typed = items.filter((i) => answers[i]?.trim()).length;
 	const refresh = () => { qc.invalidateQueries({ queryKey: ['drafts'] }); qc.invalidateQueries({ queryKey: ['draft'] }); qc.invalidateQueries({ queryKey: ['conversation'] }); qc.invalidateQueries({ queryKey: ['nav-drafts'] }); };
 	const payload = () => ({ body: ref.current ? fromDom(ref.current) : body, to, cc, subject });
 
@@ -74,6 +80,19 @@ export default function DraftEditor({ draft, onDone, compact }: { draft: any; on
 		onError: (e: any) => { refresh(); toast(e.message, 'error'); },
 	});
 	const regen = useMutation({ mutationFn: () => api(`/drafts/${draft.id}/regenerate`, { body: {} }), onSuccess: () => { refresh(); toast('A new draft was written'); }, onError: (e: any) => toast(e.message, 'error') });
+	const fill = useMutation({
+		mutationFn: async (rewrite: boolean) => {
+			if (dirty) await api(`/drafts/${draft.id}`, { method: 'PUT', body: payload() });
+			return api(`/drafts/${draft.id}/fill`, { body: { rewrite, answers: items.filter((i) => answers[i]?.trim()).map((i) => ({ item: i, value: answers[i] })) } });
+		},
+		onSuccess: (r: any) => {
+			setAnswers({});
+			setDirty(false);
+			refresh();
+			toast(`${r.how === 'rewritten by AI' ? 'Email rewritten with your answers' : 'Answers added to the email'}${r.remaining ? `; ${r.remaining} item${r.remaining > 1 ? 's' : ''} still to fill in` : '; ready to send'}`);
+		},
+		onError: (e: any) => toast(e.message, 'error'),
+	});
 	const dismiss = useMutation({ mutationFn: () => api(`/drafts/${draft.id}/dismiss`, { body: {} }), onSuccess: () => { refresh(); toast('Draft dismissed'); onDone?.(); } });
 
 	const onInput = () => { if (ref.current) { setBody(fromDom(ref.current)); setDirty(true); } };
@@ -103,10 +122,29 @@ export default function DraftEditor({ draft, onDone, compact }: { draft: any; on
 				<label htmlFor={`su-${draft.id}`}>Subject</label><input id={`su-${draft.id}`} className="input" value={subject} disabled={!editable} onChange={(e) => { setSubject(e.target.value); setDirty(true); }} />
 			</div>
 			{open > 0 && editable && (
-				<div className="notice warn small mt-8">
-					<MdInfoOutline />
-					<span><b>{open} item{open > 1 ? 's' : ''} to fill in.</b> The highlighted text is information the AI does not have. Click it and type the answer.</span>
-					<button className="btn sm" style={{ marginLeft: 'auto' }} onClick={nextPlaceholder}>Next <MdArrowForward /></button>
+				<div className="info-needed mt-8">
+					<div className="row-between">
+						<b className="row" style={{ gap: 6 }}><MdEditNote /> Information needed ({items.length})</b>
+						<button className="btn ghost sm" onClick={nextPlaceholder} title="Jump to the next yellow item in the email">Show in email <MdArrowForward /></button>
+					</div>
+					<div className="xs faint">Type each answer in its box, in Hindi or English. Then press <b>Add and rewrite</b>: the email is rewritten so your answers read naturally, in the reader's language.</div>
+					<div className="info-items">
+						{items.map((it, k) => (
+							<label key={it} className="info-item">
+								<span>{k + 1}. {it}</span>
+								<textarea className="input" rows={1} value={answers[it] || ''} placeholder="Type the answer"
+									onChange={(e) => setAnswers({ ...answers, [it]: e.target.value })}
+									onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && typed) fill.mutate(true); }} />
+							</label>
+						))}
+					</div>
+					<div className="row wrap" style={{ gap: 8 }}>
+						<button className="btn primary sm" disabled={!typed || fill.isPending} onClick={() => fill.mutate(true)}>
+							<MdAutoAwesome /> {fill.isPending ? 'Rewriting…' : `Add and rewrite${typed && typed < items.length ? ` (${typed} of ${items.length})` : ''}`}
+						</button>
+						<button className="btn ghost sm" disabled={!typed || fill.isPending} onClick={() => fill.mutate(false)} title="Put the answers in exactly as typed, without rewriting">Insert as typed</button>
+						<span className="xs faint">You can answer some now and the rest later. Ctrl+Enter also submits.</span>
+					</div>
 				</div>
 			)}
 			<div

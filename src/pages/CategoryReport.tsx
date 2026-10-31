@@ -6,7 +6,7 @@ import { api, getToken, qs } from '../api/client';
 import { useFilters } from '../contexts/FilterContext';
 import FilterBar from '../components/FilterBar';
 import { EmailTabs } from './Conversations';
-import { Card, Kpi, Loader, PageHead, RagDot, Switch } from '../components/ui';
+import { Card, Kpi, Loader, Meter, PageHead, RagDot, Sparkline, Story, Switch } from '../components/ui';
 import { BUSINESS_COLORS, COLORS, fmtDate } from '../lib/format';
 
 const n = (v: number) => (v ? v.toLocaleString('en-IN') : <span className="faint">0</span>);
@@ -46,6 +46,25 @@ export default function CategoryReport() {
 			{isLoading || !data ? <Loader /> : (
 				<>
 					<p className="print-only small">Period {fmtDate(data.from)} to {fmtDate(data.to)}</p>
+					{(() => {
+						const live = data.groups.filter((g: any) => g.conversations > 0);
+						const top = live[0];
+						const waitTop = [...live].sort((a: any, b: any) => b.awaiting - a.awaiting)[0];
+						const redTop = [...live].sort((a: any, b: any) => b.red - a.red)[0];
+						const subs = live.flatMap((g: any) => g.subgroups.filter((s: any) => s.key).map((s: any) => ({ ...s, group: g.label })));
+						const slow = subs.filter((s: any) => s.conversations >= 5 && s.avg_first_response_hours !== null).sort((a: any, b: any) => b.avg_first_response_hours - a.avg_first_response_hours)[0];
+						return top ? (
+							<Story
+								head={<>{top.label} is the largest group with {top.conversations.toLocaleString('en-IN')} threads ({Math.round((top.conversations / Math.max(1, data.totals.conversations)) * 100)}%){waitTop.key === top.key ? <> and also has the most waiting for a reply ({waitTop.awaiting.toLocaleString('en-IN')})</> : <>; {waitTop.label.toLowerCase()} has the most waiting for a reply ({waitTop.awaiting.toLocaleString('en-IN')})</>}.</>}
+								points={[
+									redTop?.red ? <>{redTop.label} has the most red threads open: {redTop.red}.</> : null,
+									slow ? <>Slowest first reply: {slow.label} ({slow.group}), {Math.round(slow.avg_first_response_hours)} hours on average.</> : null,
+									<>{data.totals.drafts_waiting.toLocaleString('en-IN')} drafts are waiting in Replies to send.</>,
+								]}
+								next={<>Open the group with the most waiting, then send its ready drafts.</>}
+							/>
+						) : null;
+					})()}
 					<div className="grid g-4 mb-16">
 						<Kpi label="Threads" value={data.totals.conversations.toLocaleString('en-IN')} accent={COLORS.general} foot={`${data.totals.emails.toLocaleString('en-IN')} emails`} />
 						<Kpi label="Awaiting reply" value={data.totals.awaiting} accent={COLORS.blue} foot={`${data.totals.overdue_replies} past the reply target`} />
@@ -58,7 +77,8 @@ export default function CategoryReport() {
 					</div>
 					{groups.map((g: any) => (
 						<Card key={g.key} accent={BUSINESS_COLORS[g.key] || COLORS.grey} className="mb-16 report-group"
-							title={<h2>{g.label} <span className="faint" style={{ fontWeight: 600, fontSize: 14 }}>· {g.conversations.toLocaleString('en-IN')} threads</span></h2>}
+							title={<h2 className="row wrap" style={{ gap: 10 }}>{g.label} <span className="faint" style={{ fontWeight: 600, fontSize: 14 }}>· {g.conversations.toLocaleString('en-IN')} threads</span>
+								{g.weekly?.some((x: number) => x) && <span className="row xs faint" style={{ gap: 6, fontWeight: 600 }} title="New threads per week, last 12 weeks"><Sparkline v={g.weekly} color={BUSINESS_COLORS[g.key] || COLORS.pink} /> 12 weeks</span>}</h2>}
 							sub={g.description}
 							actions={g.conversations > 0 && <button className="btn sm no-print" onClick={() => open(g.key)}>Open group</button>}
 							flush>
@@ -84,7 +104,7 @@ export default function CategoryReport() {
 													<h3 className="report-sub">{s.label}</h3>
 													<div className="xs faint">{s.description}</div>
 												</td>
-												<td className="num"><b>{n(s.conversations)}</b></td>
+												<td className="num nowrap"><Meter v={s.conversations} max={g.conversations} w={56} /> <b>{n(s.conversations)}</b></td>
 												<td className="num">{n(s.awaiting)}</td>
 												<td className="num" style={{ color: s.overdue_replies ? COLORS.red : undefined }}>{n(s.overdue_replies)}</td>
 												<td className="num" style={{ color: s.negative ? COLORS.amber : undefined }}>{n(s.negative)}</td>
