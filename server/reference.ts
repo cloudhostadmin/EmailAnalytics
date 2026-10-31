@@ -57,6 +57,9 @@ export async function importCsv(orgId: number, kind: RefKind, csv: string, repla
 	const rows = parseCsv(csv || '');
 	if (rows.length < 2) throw new HttpError(400, 'The file needs a header row and at least one data row');
 	if (rows.length > 20001) throw new HttpError(400, 'At most 20,000 rows per upload');
+	// skip title or note lines above the header (as in the Excel template)
+	const hi = rows.slice(0, 10).findIndex((r) => r.some((h) => HEAD.title.includes(String(h).trim().toLowerCase())));
+	if (hi > 0) rows.splice(0, hi);
 	const header = rows[0];
 	const ix = Object.fromEntries(Object.keys(HEAD).map((k) => [k, col(header, k)]));
 	if (ix.title < 0) throw new HttpError(400, `No title column found. Expected a header like: ${TEMPLATES_CSV[kind].split('\n')[0]}`);
@@ -79,6 +82,7 @@ export async function importCsv(orgId: number, kind: RefKind, csv: string, repla
 		});
 		const keywords = get('keywords').split(/[;|]/).map((x) => x.trim().toLowerCase()).filter(Boolean).slice(0, 20);
 		const body = get('body').slice(0, 2000);
+		if (kind !== 'book' && !body) continue; // a question or policy with no answer yet
 		const res = code
 			? await q<any>(
 				`insert into reference_items (org_id, kind, code, title, body, keywords, data) values ($1,$2,$3,$4,$5,$6,$7)
