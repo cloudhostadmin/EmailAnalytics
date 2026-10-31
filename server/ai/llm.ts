@@ -93,6 +93,33 @@ async function anthropicCall(body: any) {
  * (the schema is also described in the prompt), so a Gemini API change never breaks analysis.
  */
 let lastAiCall = 0;
+
+/** Gemini said the quota is used up. `retryAfterSecs` null = a daily quota (resets at midnight Pacific time). */
+export class QuotaError extends Error {
+	constructor(message: string, public retryAfterSecs: number | null) { super(message); }
+}
+let pauseCache = { until: 0, at: 0 };
+async function aiPausedUntil(): Promise<number> {
+	if (Date.now() - pauseCache.at < 20_000) return pauseCache.until;
+	const r = await q<any>('select paused_until from ai_state where id=1').catch(() => []);
+	pauseCache = { until: r[0]?.paused_until ? new Date(r[0].paused_until).getTime() : 0, at: Date.now() };
+	return pauseCache.until;
+}
+export const aiPaused = async () => (await aiPausedUntil()) > Date.now();
+async function recordAiError(e: any) {
+	let until: Date | null = null;
+	if (e instanceof QuotaError) {
+		if (e.retryAfterSecs === null) {
+			// daily quotas reset at midnight Pacific time
+			const now = new Date();
+			const pt = new Date(now.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
+			const next = new Date(pt); next.setHours(24, 5, 0, 0);
+			until = new Date(now.getTime() + (next.getTime() - pt.getTime()));
+		} else until = new Date(Date.now() + Math.max(60, e.retryAfterSecs) * 1000);
+	}
+	await q(`update ai_state set last_error=$1, last_error_at=now(), paused_until=coalesce($2, paused_until) where id=1`, [String(e.message).slice(0, 500), until]).catch(() => {});
+	if (until) pauseCache = { until: until.getTime(), at: Date.now() };
+}
 /** Optional pacing for free-tier quotas: AI_MIN_INTERVAL_MS=6000 ≈ 10 requests a minute. */
 async function pace() {
 	const gap = Number(process.env.AI_MIN_INTERVAL_MS || 0);
@@ -127,13 +154,22 @@ async function geminiCall(opts: { system: string; prompt: string; schema?: objec
 				signal: AbortSignal.timeout(90_000),
 			});
 			const data: any = await res.json().catch(() => ({}));
-			if (res.status === 429 || res.status >= 500) {
+			if (res.status === 429) {
+				const msg = String(data?.error?.message || '');
+				const retry = (data?.error?.details || []).find((d: any) => String(d['@type'] || '').includes('RetryInfo'))?.retryDelay;
+				const secs = retry ? parseFloat(String(retry)) : NaN;
+				// a daily quota, or a long retry delay: stop now and pause, retrying only wastes the quota
+				if (/per ?day|PerDay|daily/i.test(msg) || secs > 60) throw new QuotaError(msg || 'Gemini quota reached', /per ?day|PerDay|daily/i.test(msg) ? null : secs);
+				await new Promise((r) => setTimeout(r, Math.max(2000 * 2 ** i, (secs || 0) * 1000)));
+				continue;
+			}
+			if (res.status >= 500) {
 				await new Promise((r) => setTimeout(r, 2000 * 2 ** i));
 				continue;
 			}
 			return { res, data };
 		}
-		throw new Error('Gemini kept returning rate-limit or server errors');
+		throw new QuotaError('Gemini kept returning rate-limit errors (429)', 120);
 	};
 	let { res, data } = await attempt(true);
 	if (!res.ok && res.status === 400 && opts.schema) ({ res, data } = await attempt(false));
@@ -247,6 +283,7 @@ export async function analyseThread(input: ThreadInput, orgId: number): Promise<
 	const provider = aiProvider();
 	if (provider === 'heuristic') return { analysis: fallback, model: 'remail-heuristic-v1' };
 	const model = aiModel();
+	if (await aiPaused()) return { analysis: fallback, model: 'remail-heuristic-v1 (fallback)' };
 	try {
 		if (provider === 'gemini') {
 			const r = await geminiCall({
@@ -288,6 +325,7 @@ export async function analyseThread(input: ThreadInput, orgId: number): Promise<
 		return { analysis: coerce(JSON.parse(args), fallback), model };
 	} catch (e: any) {
 		console.error('[ai] analysis failed, using heuristic fallback:', e.message);
+		await recordAiError(e);
 		return { analysis: fallback, model: 'remail-heuristic-v1 (fallback)' };
 	}
 }

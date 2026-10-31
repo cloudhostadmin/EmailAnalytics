@@ -455,4 +455,21 @@ create unique index if not exists reply_drafts_conv_uq on reply_drafts (conversa
 create index if not exists reply_drafts_org_status_idx on reply_drafts (org_id, status, generated_at desc);
 alter table mailboxes alter column backfill_days set default 90;
 ` },
+{ id: '006_worker_lease_ai_state', sql: String.raw`
+-- one background run at a time (the scheduler fires every 5 minutes, a run lasts up to 13)
+create table if not exists worker_lease (
+  name   text primary key,
+  holder text,
+  until  timestamptz not null default now()
+);
+-- AI provider back-off: when the quota is used up, analysis pauses instead of retrying
+create table if not exists ai_state (
+  id            int primary key default 1,
+  paused_until  timestamptz,
+  last_error    text,
+  last_error_at timestamptz,
+  check (id = 1)
+);
+insert into ai_state (id) values (1) on conflict do nothing;
+` },
 ];

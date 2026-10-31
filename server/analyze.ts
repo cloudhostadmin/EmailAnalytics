@@ -1,6 +1,6 @@
 import { upsertDraft } from './drafts';
 import { one, q } from './db';
-import { analyseThread } from './ai/llm';
+import { aiPaused, analyseThread } from './ai/llm';
 import { heuristicAnalyse } from './ai/heuristic';
 import type { ThreadInput } from './ai/types';
 import { getOrg } from './settings';
@@ -12,11 +12,13 @@ import { evaluateConversationAlerts, evaluateHealthAlert } from './alerts';
 const MAX_MESSAGES = 14;
 
 export async function analysePending(orgId: number, limit = 25, deadline = Date.now() + 60_000) {
+	// new and changed threads first; threads that fell back to the rules engine are retried only while the AI is available
+	const retryFallbacks = !(await aiPaused());
 	const rows = await q<{ id: number }>(
 		`select id from conversations where org_id=$1 and message_count > 0
-		   and (needs_analysis or (analysis_model like '%(fallback)%' and analysed_at < now() - interval '30 minutes'))
-		 order by last_message_at desc limit $2`,
-		[orgId, limit],
+		   and (needs_analysis or ($3 and analysis_model like '%(fallback)%' and analysed_at < now() - interval '30 minutes'))
+		 order by needs_analysis desc, last_message_at desc limit $2`,
+		[orgId, limit, retryFallbacks],
 	);
 	let done = 0;
 	const customers = new Set<number>();

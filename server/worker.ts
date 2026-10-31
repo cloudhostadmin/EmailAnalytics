@@ -47,23 +47,37 @@ export async function runTick(opts: { budgetMs?: number; mailboxId?: number; rep
 	await loadServiceAccount();
 	await ensureSchema();
 	const orgId = await defaultOrgId();
-	const deadline = Date.now() + (opts.budgetMs ?? 12 * 60_000);
+	const budget = opts.budgetMs ?? 12 * 60_000;
+	const deadline = Date.now() + budget;
 	const log: Record<string, unknown> = {};
+	// one full run at a time: the scheduler fires every 5 minutes and a run can last 13
+	const holder = Math.random().toString(36).slice(2);
+	const lease = await q<any>(
+		`insert into worker_lease (name, holder, until) values ('tick', $1, now() + make_interval(secs => $2))
+		 on conflict (name) do update set holder=excluded.holder, until=excluded.until where worker_lease.until < now() returning holder`,
+		[holder, Math.ceil(budget / 1000) + 60],
+	);
+	const owner = lease.length > 0;
+	if (!owner && !opts.mailboxId) return { skipped: 'another run is in progress' };
+	try {
 
 	const mailboxes = await q<{ id: number; address: string }>(
 		`select id, address from mailboxes where org_id=$1 and status in ('active','error') and provider in ('microsoft','microsoft_app','gmail','gmail_app')
 		 ${opts.mailboxId ? 'and id=$2' : ''} order by last_synced_at nulls first`,
 		opts.mailboxId ? [orgId, opts.mailboxId] : [orgId],
 	);
+	// syncing may use at most about half the run, so analysis always gets time (big backfills continue next run)
+	const syncDeadline = opts.mailboxId ? deadline - 60_000 : Date.now() + budget * 0.5;
 	for (const mb of mailboxes) {
 		let rounds = 0;
-		while (Date.now() < deadline - 60_000 && rounds < 20) {
+		while (Date.now() < syncDeadline && rounds < (opts.mailboxId ? 20 : 8)) {
 			const r: any = await syncMailbox(mb.id);
 			log[mb.address] = r;
 			rounds++;
 			if (!r?.more) break;
 		}
 	}
+	if (!owner) return { ...log, analysis: 'skipped: another run is analysing' };
 	let analysed = 0;
 	while (Date.now() < deadline - 20_000) {
 		const n = await analysePending(orgId, 20, deadline - 15_000);
@@ -80,6 +94,9 @@ export async function runTick(opts: { budgetMs?: number; mailboxId?: number; rep
 	if (opts.reports !== false) log.digests = await sendDailyDigests(orgId).catch((e) => (console.error('[digest]', e.message), 0));
 	await purgeExpired(orgId).catch(() => {});
 	return log;
+	} finally {
+		if (owner) await q(`update worker_lease set until=now() where name='tick' and holder=$1`, [holder]).catch(() => {});
+	}
 }
 
 /** Data retention: remove email bodies beyond the configured retention period. */

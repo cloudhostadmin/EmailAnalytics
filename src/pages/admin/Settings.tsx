@@ -95,6 +95,15 @@ export default function Settings() {
 								<Status ok={d.connectors.google} label="Sign in with Google and own Gmail" detail={d.connectors.google ? 'Enabled' : 'Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET'} />
 								<Status ok={d.webhooks.teams || d.webhooks.slack} label="Teams or Slack alerts" detail={[d.webhooks.teams && 'Teams', d.webhooks.slack && 'Slack'].filter(Boolean).join(', ') || 'Not configured'} />
 								<Status ok={d.gmailSend} label="Send replies through Gmail" detail={d.gmailSend ? 'Enabled: replies go out only when someone presses Send' : 'Off (GMAIL_SEND_ENABLED=false)'} />
+								{d.progress && (
+									<>
+										<Status ok={!d.progress.waiting_for_analysis} label="Analysis progress" detail={`${d.progress.analysed_by_ai} analysed by AI · ${d.progress.waiting_for_analysis} waiting · ${d.progress.rules_engine_fallback} on the rules engine for now`} />
+										{d.progress.ai_paused_until && new Date(d.progress.ai_paused_until) > new Date() && (
+											<Status ok={false} label="AI paused: quota reached" detail={`Resumes ${new Date(d.progress.ai_paused_until).toLocaleString()}. Enable billing on the Google Cloud project, or set AI_MIN_INTERVAL_MS, to go faster.`} />
+										)}
+										{d.progress.ai_last_error && <Status ok={false} label="Last AI error" detail={`${d.progress.ai_last_error}${d.progress.ai_last_error_at ? ` (${new Date(d.progress.ai_last_error_at).toLocaleString()})` : ''}`} />}
+									</>
+								)}
 																<Status ok={d.mailboxes.errors === 0} label="Mailboxes" detail={`${d.mailboxes.total} connected · ${d.mailboxes.errors} with errors`} />
 								<Status ok={d.pendingAnalysis < 50} label="Analysis queue" detail={`${d.pendingAnalysis} conversations waiting`} />
 								<div className="small faint mt-16">Last worker run {ago(d.lastWorkerRun)} · last mailbox sync {ago(d.mailboxes.last_synced)}</div>
