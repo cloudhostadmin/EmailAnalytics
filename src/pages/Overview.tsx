@@ -106,7 +106,7 @@ export default function Overview() {
 									]}
 									options={{
 										chart: { stacked: true },
-										colors: [COLORS.red, '#DCCDB6', COLORS.green],
+										colors: [COLORS.red, '#CBD5E1', COLORS.green],
 										plotOptions: { bar: { columnWidth: '62%', borderRadius: 3 } },
 										xaxis: { categories: t.sentiment.map((r: any) => fmtBucket(r.bucket)), tickAmount: 10 },
 									}}
@@ -210,7 +210,7 @@ export default function Overview() {
 									]}
 									options={{
 										chart: { stacked: true },
-										colors: [COLORS.general, '#DCCDB6'],
+										colors: [COLORS.general, '#CBD5E1'],
 										plotOptions: { bar: { columnWidth: '55%', borderRadius: 3 } },
 										xaxis: { categories: t.mailboxes.map((m: any) => m.display_name || m.address) },
 									}}

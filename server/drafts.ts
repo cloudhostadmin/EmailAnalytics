@@ -10,6 +10,8 @@ import { audit } from './audit';
 import type { SessionUser } from './auth';
 import { getOrg } from './settings';
 import { gmailSendReply, gmailSendEnabled } from './connectors/gmail';
+import { footerForConversation } from './branding';
+import { GITAPRESS_LOGO_PNG_BASE64 } from './assets';
 import type { MailboxRow } from './connectors/types';
 
 export const PLACEHOLDER = /\[\[\s*provide\s*:(.*?)\]\](?!\])/gis;
@@ -142,6 +144,8 @@ export async function sendDraft(ctx: any, user: SessionUser, id: number, edits: 
 	const src = d.reply_to_email_id ? await one<any>('select e.* from emails e where e.id=$1', [d.reply_to_email_id]) : null;
 	const copy = src ? await one<any>(`select provider_thread_id from emails where mailbox_id=$1 and (id=$2 or dedup_key=$3) limit 1`, [mb.id, src.id, src.dedup_key]) : null;
 	const sender = await one<any>('select full_name from users where id=$1', [user.id]);
+	// the footer: logo, website and the branch address for the reader's city (or the head office)
+	const footer = await footerForConversation(user.orgId, d.conversation_id).catch(() => null);
 	try {
 		const res = await gmailSendReply(mb, {
 			from: mb.address,
@@ -149,8 +153,9 @@ export async function sendDraft(ctx: any, user: SessionUser, id: number, edits: 
 			to: d.to_addresses,
 			cc: d.cc_addresses || [],
 			subject: d.subject,
-			text: d.body,
-			html: bodyToHtml(d.body),
+			text: footer ? `${d.body}\n${footer.text}` : d.body,
+			html: footer ? bodyToHtml(d.body).replace(/<\/div>$/, `${footer.html}</div>`) : bodyToHtml(d.body),
+			inline: footer ? [{ cid: 'gitapress-logo', contentType: 'image/png', base64: GITAPRESS_LOGO_PNG_BASE64, filename: 'gitapress-logo.png' }] : [],
 			threadId: copy?.provider_thread_id || null,
 			inReplyTo: src?.internet_message_id || null,
 			references: [src?.in_reply_to, src?.internet_message_id].filter(Boolean),

@@ -61,8 +61,8 @@ export default function Insights() {
 						<Chart type="heatmap" height={Math.max(260, cats.length * 28 + 60)} series={heatSeries}
 							options={{
 								colors: [COLORS.pink],
-								plotOptions: { heatmap: { radius: 4, shadeIntensity: 0.6, colorScale: { ranges: [{ from: 0, to: 0, color: '#FAF5EC', name: 'none' }] } } },
-								dataLabels: { enabled: true, style: { colors: ['#2B1A0D'], fontWeight: 600 } },
+								plotOptions: { heatmap: { radius: 4, shadeIntensity: 0.6, colorScale: { ranges: [{ from: 0, to: 0, color: '#F8FAFC', name: 'none' }] } } },
+								dataLabels: { enabled: true, style: { colors: ['#0F172A'], fontWeight: 600 } },
 								legend: { show: false },
 								stroke: { width: 2, colors: ['#fff'] },
 							}} />

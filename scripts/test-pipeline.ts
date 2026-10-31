@@ -157,6 +157,19 @@ const en = await enrichCustomer(twinIds[0], { web: false });
 assert.ok(en && en.activity.threads >= 0);
 assert.ok(en!.possible_duplicates.some((d: any) => d.id === twinIds[1]), 'same phone found as possible duplicate');
 
+// reply footer: the branch in the reader's city when its address is on file, otherwise the head office
+const { branches: brList, pickBranch, footerParts, HEAD_OFFICE } = await import('../server/branding');
+const bl = brList([{ city: 'Mumbai', state: 'Maharashtra', address: 'Gita Press, Test address, Mumbai 400002' }]);
+assert.equal(pickBranch(bl, { city: 'Bombay' }).branch.city, 'Mumbai');
+assert.equal(pickBranch(bl, { address: 'Flat 2, Dadar, Mumbai, 400014' }).branch.city, 'Mumbai');
+assert.equal(pickBranch(bl, { city: 'Kolkata' }).branch, HEAD_OFFICE, 'no address on file for Kolkata, so the head office');
+assert.equal(pickBranch(bl, {}).branch, HEAD_OFFICE);
+const fp = footerParts(HEAD_OFFICE);
+assert.ok(fp.text.includes('273005') && fp.text.includes('www.gitapress.org') && fp.html.includes('cid:gitapress-logo'));
+const mime2 = buildMime({ from: 'a@gitapress.org', to: ['r@gmail.com'], cc: [], subject: 'Re: x', text: 't', html: `<p>t</p>${fp.html}`, inline: [{ cid: 'gitapress-logo', contentType: 'image/png', base64: 'iVBORw0KGgo=', filename: 'logo.png' }] });
+assert.match(mime2, /multipart\/related/);
+assert.match(mime2, /Content-ID: <gitapress-logo>/);
+
 // cold marketing is not waiting for a reply
 const promo = heuristicAnalyse(input('Grow your business with our digital marketing and SEO services. Free listing for your books. Click to unsubscribe.', "Don't Just Advertise. Create Opportunities for Growth."));
 assert.equal(promo.requires_reply, false);

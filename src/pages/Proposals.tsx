@@ -12,7 +12,7 @@ import { COLORS, KIND_LABELS, STAGE_LABELS, ago, fmtDate } from '../lib/format';
 const STAGES = ['request_received', 'in_preparation', 'submitted', 'negotiation', 'won', 'lost', 'no_response'];
 const STAGE_COLORS: Record<string, string> = {
 	request_received: COLORS.blue, in_preparation: COLORS.amber, submitted: COLORS.purple, negotiation: COLORS.pink,
-	won: COLORS.green, lost: '#9A8670', no_response: '#DCCDB6',
+	won: COLORS.green, lost: '#94A3B8', no_response: '#CBD5E1',
 };
 
 export default function Proposals() {

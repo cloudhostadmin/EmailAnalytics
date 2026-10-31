@@ -85,12 +85,12 @@ export default function Login() {
 			{cfg.data?.microsoft && (
 				<>
 					<button type="button" className="auth-btn" onClick={microsoft} disabled={msBusy}
-						style={{ background: '#fff', color: 'var(--text)', border: '1px solid #DCCDB6', boxShadow: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+						style={{ background: '#fff', color: 'var(--text)', border: '1px solid #CBD5E1', boxShadow: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
 						<svg width="18" height="18" viewBox="0 0 21 21" aria-hidden="true"><rect x="1" y="1" width="9" height="9" fill="#f25022" /><rect x="11" y="1" width="9" height="9" fill="#7fba00" /><rect x="1" y="11" width="9" height="9" fill="#00a4ef" /><rect x="11" y="11" width="9" height="9" fill="#ffb900" /></svg>
 						{msBusy ? 'Redirecting…' : 'Sign in with Microsoft'}
 					</button>
 					{cfg.data?.microsoftConnectsMailbox && <div className="xs faint" style={{ marginTop: 8, textAlign: 'center' }}>Use your work account. Signing in also connects your Outlook inbox, read-only.</div>}
-					<div className="row" style={{ margin: '18px 0', color: 'var(--text-3)', fontSize: 12 }}><span className="grow" style={{ height: 1, background: '#E6D9C4' }} />or with an email and password<span className="grow" style={{ height: 1, background: '#E6D9C4' }} /></div>
+					<div className="row" style={{ margin: '18px 0', color: 'var(--text-3)', fontSize: 12 }}><span className="grow" style={{ height: 1, background: '#E2E8F0' }} />or with an email and password<span className="grow" style={{ height: 1, background: '#E2E8F0' }} /></div>
 				</>
 			)}
 			<form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }} noValidate>

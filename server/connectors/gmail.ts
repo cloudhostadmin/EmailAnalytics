@@ -325,6 +325,8 @@ export interface OutgoingReply {
 	threadId?: string | null;
 	inReplyTo?: string | null;
 	references?: string[];
+	/** images referenced from the HTML as cid:… */
+	inline?: { cid: string; contentType: string; base64: string; filename: string }[];
 }
 
 export function buildMime(m: OutgoingReply): string {
@@ -338,13 +340,20 @@ export function buildMime(m: OutgoingReply): string {
 		m.inReplyTo ? `In-Reply-To: ${m.inReplyTo}` : '',
 		refs.length ? `References: ${refs.join(' ')}` : '',
 		'MIME-Version: 1.0',
-		`Content-Type: multipart/alternative; boundary="${boundary}"`,
 	].filter(Boolean);
-	return [
-		...headers, '',
+	const alt = [
 		`--${boundary}`, 'Content-Type: text/plain; charset="UTF-8"', 'Content-Transfer-Encoding: base64', '', wrap76(Buffer.from(m.text).toString('base64')),
 		`--${boundary}`, 'Content-Type: text/html; charset="UTF-8"', 'Content-Transfer-Encoding: base64', '', wrap76(Buffer.from(m.html).toString('base64')),
-		`--${boundary}--`, '',
+		`--${boundary}--`,
+	];
+	if (!m.inline?.length) return [...headers, `Content-Type: multipart/alternative; boundary="${boundary}"`, '', ...alt, ''].join('\r\n');
+	// text and HTML, plus the images the HTML shows inline (the logo)
+	const rel = `rel_${boundary}`;
+	return [
+		...headers, `Content-Type: multipart/related; boundary="${rel}"`, '',
+		`--${rel}`, `Content-Type: multipart/alternative; boundary="${boundary}"`, '', ...alt,
+		...m.inline.flatMap((f) => [`--${rel}`, `Content-Type: ${f.contentType}; name="${f.filename}"`, 'Content-Transfer-Encoding: base64', `Content-ID: <${f.cid}>`, `Content-Disposition: inline; filename="${f.filename}"`, '', wrap76(f.base64)]),
+		`--${rel}--`, '',
 	].join('\r\n');
 }
 

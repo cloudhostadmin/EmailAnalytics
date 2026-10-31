@@ -4,7 +4,7 @@
  * yellow item remains. Sending goes through Gmail as a reply in the same thread.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { MdSend, MdSave, MdRefresh, MdClose, MdContentCopy, MdArrowForward, MdInfoOutline, MdAutoAwesome, MdEditNote } from 'react-icons/md';
 import { api } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -65,6 +65,7 @@ export default function DraftEditor({ draft, onDone, compact }: { draft: any; on
 		if (ref.current) ref.current.innerHTML = toHtml(draft.body);
 	}, [draft.id, draft.body, draft.updated_at]);
 
+	const footerQ = useQuery({ queryKey: ['draft-footer', draft.id], queryFn: () => api(`/drafts/${draft.id}/footer`), staleTime: 300_000, enabled: draft.status !== 'sent' });
 	const open = useMemo(() => countPlaceholders(body), [body]);
 	const items = useMemo(() => placeholderList(body), [body]);
 	const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -159,6 +160,12 @@ export default function DraftEditor({ draft, onDone, compact }: { draft: any; on
 				role="textbox"
 				aria-multiline="true"
 			/>
+			{footerQ.data?.footer && (
+				<div className="draft-footer" title="Added automatically when the reply is sent">
+					<div dangerouslySetInnerHTML={{ __html: footerQ.data.footer.html.replace('cid:gitapress-logo', '/brand/gitapress-logo.png') }} />
+					<div className="xs faint mt-8">Added when sent. Address: {footerQ.data.footer.branch.city === 'Gorakhpur' ? 'head office' : `${footerQ.data.footer.branch.city} branch`}, because {footerQ.data.footer.why}. Branch addresses are in Settings → Reply drafts.</div>
+				</div>
+			)}
 			{draft.last_error && !sent && <div className="notice error small mt-8"><MdInfoOutline /><span>Last send failed: {draft.last_error}</span></div>}
 			<div className="row wrap mt-8" style={{ gap: 8 }}>
 				{sent ? (

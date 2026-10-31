@@ -40,19 +40,19 @@ export const catLabel = (c: string) => CATEGORY_LABELS[c] || c;
 export const stateLabel = (s?: string | null) => (s ? s.replace('_', ' ').replace(/^./, (c) => c.toUpperCase()) : '');
 
 export const COLORS = {
-	pink: '#9E1C0C',
-	navy: '#2B1A0D',
-	blue: '#D9771E',
-	amber: '#F49940',
-	purple: '#7A4E9E',
-	teal: '#2A9D8F',
-	general: '#8B4A16',
-	green: '#2E8B57',
-	red: '#C62828',
-	grey: '#B8A893',
+	pink: '#4F46E5',
+	navy: '#0F172A',
+	blue: '#2563EB',
+	amber: '#F59E0B',
+	purple: '#7C3AED',
+	teal: '#0D9488',
+	general: '#475569',
+	green: '#16A34A',
+	red: '#DC2626',
+	grey: '#CBD5E1',
 };
 export const RAG_COLORS: Record<string, string> = { red: COLORS.red, amber: COLORS.amber, green: COLORS.green };
-export const SENT_COLORS: Record<string, string> = { negative: COLORS.red, neutral: '#B8A893', positive: COLORS.green };
+export const SENT_COLORS: Record<string, string> = { negative: COLORS.red, neutral: '#CBD5E1', positive: COLORS.green };
 
 export const BUSINESS_LABELS: Record<string, string> = {
 	customer_service: 'Reader and customer service',
@@ -75,9 +75,9 @@ export const BUSINESS_SHORT: Record<string, string> = {
 	internal: 'Internal', events_marketing: 'Events', notifications: 'Notifications', other: 'Other',
 };
 export const BUSINESS_COLORS: Record<string, string> = {
-	customer_service: '#9E1C0C', book_orders: '#F49940', kalyan: '#D9771E', dispatch: '#8B4A16', sales_proposal: '#7A4E9E',
-	publications: '#2A9D8F', billing_finance: '#00897B', vendor_partner: '#B4600F', people_hr: '#2E8B57',
-	internal: '#2B1A0D', events_marketing: '#9A8670', notifications: '#B8A893', other: '#DCCDB6',
+	customer_service: '#6366F1', book_orders: '#0EA5E9', kalyan: '#8B5CF6', dispatch: '#14B8A6', sales_proposal: '#F59E0B',
+	publications: '#EC4899', billing_finance: '#10B981', vendor_partner: '#64748B', people_hr: '#84CC16',
+	internal: '#334155', events_marketing: '#F97316', notifications: '#CBD5E1', other: '#94A3B8',
 };
 export const bizLabel = (c?: string | null) => (c ? BUSINESS_LABELS[c] || c : '');
 export const STAGE_LABELS: Record<string, string> = {

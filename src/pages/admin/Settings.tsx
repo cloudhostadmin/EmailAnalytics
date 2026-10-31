@@ -30,7 +30,7 @@ export default function Settings() {
 			body: {
 				name: form.name,
 				internalDomains: form.internalDomains.split(',').map((d: string) => d.trim()).filter(Boolean),
-				settings: { slaHours: form.slaHours, piiRedaction: form.piiRedaction, retentionDays: form.retentionDays, analysisWindowDays: form.analysisWindowDays, ignoreAutomated: form.ignoreAutomated, autoDrafts: form.autoDrafts, replyKnowledge: form.replyKnowledge, replySignature: form.replySignature, defaultBackfillDays: form.defaultBackfillDays },
+				settings: { slaHours: form.slaHours, piiRedaction: form.piiRedaction, retentionDays: form.retentionDays, analysisWindowDays: form.analysisWindowDays, ignoreAutomated: form.ignoreAutomated, autoDrafts: form.autoDrafts, replyKnowledge: form.replyKnowledge, replySignature: form.replySignature, defaultBackfillDays: form.defaultBackfillDays, replyFooter: form.replyFooter, branches: form.branches },
 			},
 		}),
 		onSuccess: () => { qc.invalidateQueries(); toast('Settings saved'); },
@@ -75,6 +75,31 @@ export default function Settings() {
 										<option value={30}>30 days</option><option value={90}>90 days (recommended)</option><option value={180}>180 days</option><option value={365}>365 days</option>
 									</select></div>
 							</div>
+							<Switch checked={form.replyFooter !== false} onChange={(v) => admin && setForm({ ...form, replyFooter: v })} label="Add the Gita Press logo, website link and an address under every reply" />
+							{form.replyFooter !== false && (
+								<div className="field">
+									<label>Address used in the reply</label>
+									<span className="hint">The branch in the reader's city is used when its address is filled in below; otherwise the head office: {s.data?.headOffice?.address}.</span>
+									<div className="table-wrap mt-8">
+										<table className="table">
+											<thead><tr><th>Branch</th><th>Address</th><th>Phone</th><th>Email</th></tr></thead>
+											<tbody>
+												{(form.branches || []).map((b: any, i: number) => (
+													<tr key={b.city}>
+														<td className="nowrap"><b>{b.city}</b><div className="xs faint">{b.state}</div></td>
+														{(['address', 'phone', 'email'] as const).map((k) => (
+															<td key={k} style={{ minWidth: k === 'address' ? 320 : 150 }}>
+																<input className="input sm" style={{ width: '100%' }} disabled={!admin} value={b[k] || ''} placeholder={k === 'address' ? 'Full address with PIN code' : ''}
+																	onChange={(e) => setForm({ ...form, branches: form.branches.map((x: any, j: number) => (j === i ? { ...x, [k]: e.target.value } : x)) })} />
+															</td>
+														))}
+													</tr>
+												))}
+											</tbody>
+										</table>
+									</div>
+								</div>
+							)}
 						</div>
 					</Card>
 					<Card title="Data protection" accent={COLORS.purple}>

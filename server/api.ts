@@ -25,6 +25,7 @@ import { buildReport, runSchedule } from './reports';
 import { ask, SUGGESTED_QUESTIONS } from './copilot';
 import { loadDemoData, clearDemoData, demoEnabled } from './demo';
 import { enrichCustomer } from './enrich';
+import { branches as branchList, HEAD_OFFICE, footerForConversation } from './branding';
 import { buildProfile, listCustomerDb, merged as mergedProfile, updateProfile } from './profiles';
 import { listTemplates, resetTemplate, updateTemplate } from './templates';
 import { deleteReference, importCsv, listReference, matchReference, TEMPLATES_CSV, type RefKind } from './reference';
@@ -447,6 +448,10 @@ r.post('/api/drafts/:id/fill', async (ctx) => {
 	const res = await fillDraft(ctx.user!, d.id, ctx.body?.answers || [], ctx.body?.rewrite !== false);
 	await audit(ctx, 'reply.filled', 'reply_draft', d.id, { filled: res.filled, remaining: res.remaining, how: res.how });
 	return res;
+});
+r.get('/api/drafts/:id/footer', async (ctx) => {
+	const d = await draftAccess(ctx);
+	return { footer: await footerForConversation(ctx.user!.orgId, d.conversation_id) };
 });
 r.post('/api/drafts/:id/dismiss', async (ctx) => {
 	requireRole(ctx.user, 'analyst');
@@ -1159,7 +1164,7 @@ r.del('/api/settings/google-service-account', async (ctx) => {
 r.get('/api/settings', async (ctx) => {
 	const org = await getOrg(ctx.user!.orgId, true);
 	const { googleServiceAccountEnc: _secret, ...settings } = org.settings as any;
-	return { name: org.name, internalDomains: org.internalDomains, settings };
+	return { name: org.name, internalDomains: org.internalDomains, settings: { replyFooter: true, ...settings, branches: branchList(settings.branches) }, headOffice: HEAD_OFFICE };
 });
 
 r.patch('/api/settings', async (ctx) => {
@@ -1176,6 +1181,8 @@ r.patch('/api/settings', async (ctx) => {
 		if (settings.autoDrafts !== undefined) next.autoDrafts = !!settings.autoDrafts;
 		if (settings.replyKnowledge !== undefined) next.replyKnowledge = String(settings.replyKnowledge).slice(0, 6000);
 		if (settings.replySignature !== undefined) next.replySignature = String(settings.replySignature).slice(0, 600);
+		if (settings.replyFooter !== undefined) (next as any).replyFooter = !!settings.replyFooter;
+		if (Array.isArray(settings.branches)) (next as any).branches = settings.branches.slice(0, 60).map((b: any) => ({ city: String(b.city || '').slice(0, 60), state: String(b.state || '').slice(0, 60), address: String(b.address || '').trim().slice(0, 300), phone: String(b.phone || '').trim().slice(0, 120), email: String(b.email || '').trim().slice(0, 120) })).filter((b: any) => b.city);
 		if (settings.defaultBackfillDays !== undefined) next.defaultBackfillDays = Math.max(7, Math.min(365, Number(settings.defaultBackfillDays) || 90));
 	}
 	await q(`update organisations set name=coalesce($2,name), internal_domains=coalesce($3,internal_domains), settings=$4 where id=$1`, [

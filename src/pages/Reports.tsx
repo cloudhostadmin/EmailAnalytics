@@ -100,7 +100,7 @@ export default function Reports() {
 
 			{preview && (
 				<Modal title="Report preview" onClose={() => setPreview(null)} wide>
-					<iframe title="Report" srcDoc={preview} style={{ width: '100%', height: '70vh', border: 0, borderRadius: 12, background: '#FAF5EC' }} sandbox="" />
+					<iframe title="Report" srcDoc={preview} style={{ width: '100%', height: '70vh', border: 0, borderRadius: 12, background: '#F8FAFC' }} sandbox="" />
 				</Modal>
 			)}
 			{edit && (
