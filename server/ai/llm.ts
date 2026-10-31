@@ -59,6 +59,7 @@ function buildPrompt(input: ThreadInput): string {
 		input.replyTemplates?.length ? `Default reply templates for the likely group (${input.replyTemplates[0].group}):\n${input.replyTemplates.map((t) => `### ${t.subgroup} (${t.label})\n${t.body}`).join('\n\n').slice(0, 6000)}\n` : '',
 		`Reply signature:\n${input.replySignature || `Regards,\n${input.orgName}`}\n`,
 		input.isInternal ? 'Thread type: internal (staff only, no external party)' : `External party: ${input.customerName || 'Unknown'} (tier: ${input.customerTier || 'standard'})`,
+		input.customerProfile ? `Customer database record (use it to address them and to avoid asking for details already on file): ${input.customerProfile}` : '',
 		`Conversation id: ${input.conversationId}`,
 		`Messages (oldest first):`,
 	];
@@ -356,6 +357,27 @@ export async function analyseThread(input: ThreadInput, orgId: number): Promise<
 		await recordAiError(e);
 		return { analysis: fallback, model: 'remail-heuristic-v1 (fallback)' };
 	}
+}
+
+/** Structured extraction with a JSON schema (tool call), for any provider. Returns null when no LLM is configured. */
+export async function extractJson(orgId: number, system: string, prompt: string, schema: object, name = 'record'): Promise<any | null> {
+	const provider = aiProvider();
+	if (provider === 'heuristic') return null;
+	const model = aiModel();
+	if (provider === 'gemini') {
+		const r = await geminiCall({ system, prompt: `${prompt}\n\nReturn ONLY a JSON object.`, schema, maxTokens: 2048 });
+		await logUsage(orgId, model, r.usage.promptTokenCount, (r.usage.candidatesTokenCount || 0) + (r.usage.thoughtsTokenCount || 0), name);
+		return parseJsonLoose(r.text);
+	}
+	if (provider === 'anthropic') {
+		const data = await anthropicCall({ model, max_tokens: 1500, system, tools: [{ name, description: 'Record the extracted fields.', input_schema: schema }], tool_choice: { type: 'tool', name }, messages: [{ role: 'user', content: prompt }] });
+		await logUsage(orgId, model, data.usage?.input_tokens, data.usage?.output_tokens, name);
+		return (data.content || []).find((c: any) => c.type === 'tool_use')?.input || null;
+	}
+	const data = await openaiCall({ model, temperature: 0, messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }], tools: [{ type: 'function', function: { name, description: 'Record the extracted fields.', parameters: schema } }], tool_choice: { type: 'function', function: { name } } });
+	await logUsage(orgId, model, data.usage?.prompt_tokens, data.usage?.completion_tokens, name);
+	const args = data.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
+	return args ? JSON.parse(args) : null;
 }
 
 /** Free-text answer for the Mail Sage copilot. Returns null when no LLM is configured. */

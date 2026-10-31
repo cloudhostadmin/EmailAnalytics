@@ -96,9 +96,9 @@ export function ConversationList({ preset = {}, defaultSort = 'priority', showSe
 											<div className="row" style={{ fontWeight: 700 }}>
 												<span className="truncate">{c.customer_name || (c.is_automated ? 'Automated' : 'Internal')}</span> <TierBadge tier={c.customer_tier} />
 											</div>
-											<div className="row gap-4"><span className="chip" style={{ background: BUSINESS_COLORS[c.business_category] + '22', color: 'var(--text)' }}>{BUSINESS_SHORT[c.business_category] || 'Other'}</span>{subLabel(c.business_category, c.subcategory) && <span className="chip">{subLabel(c.business_category, c.subcategory)}</span>}{c.proposal_stage && <span className="chip">{STAGE_LABELS[c.proposal_stage]}</span>}</div>
+											<div className="tag-line"><span className="chip" style={{ background: BUSINESS_COLORS[c.business_category] + '22', color: 'var(--text)' }}>{BUSINESS_SHORT[c.business_category] || 'Other'}</span>{subLabel(c.business_category, c.subcategory) && <span className="chip">{subLabel(c.business_category, c.subcategory)}</span>}{c.proposal_stage && <span className="chip">{STAGE_LABELS[c.proposal_stage]}</span>}</div>
 											<div className="truncate muted">{c.subject || '(no subject)'}</div>
-											<div className="row wrap mt-8 gap-4">
+											<div className="tag-line mt-8">
 												{(c.categories || []).slice(0, 3).map((x: string) => <span key={x} className="chip">{catLabel(x)}</span>)}
 											</div>
 										</td>

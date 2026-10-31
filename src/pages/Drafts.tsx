@@ -5,13 +5,24 @@ import { MdExpandLess, MdExpandMore, MdOpenInNew, MdRefresh, MdSearch } from 're
 import { api, qs } from '../api/client';
 import { useFilters } from '../contexts/FilterContext';
 import DraftEditor, { countPlaceholders, placeholderList } from '../components/DraftEditor';
-import { Card, Chips, Empty, Facts, Loader, PageHead, RagBadge, RagDot, Segmented, SentimentBadge, Story } from '../components/ui';
+import { Card, Empty, Facts, Loader, PageHead, RagBadge, RagDot, Segmented, SentimentBadge, Story } from '../components/ui';
 import { BUSINESS_LABELS, COLORS, ago, bizLabel, fmtDateTime } from '../lib/format';
 import { useTaxonomy } from '../lib/taxonomy';
 
 interface F { q: string; waiting: string; rag: string[]; ready: string; type: string; sub: string; urgency: string; mailbox: string; sort: string }
 const EMPTY: F = { q: '', waiting: '', rag: [], ready: '', type: '', sub: '', urgency: '', mailbox: '', sort: 'priority' };
 const KEY = 'gitamail_reply_filters';
+const num = (n?: number) => (n !== undefined && n !== null ? ` (${n.toLocaleString('en-IN')})` : '');
+
+/** A compact labelled dropdown; highlighted when a value is chosen. */
+function Drop({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: [string, string][] }) {
+	return (
+		<select className={`input sm drop ${value ? 'on' : ''}`} value={value} onChange={(e) => onChange(e.target.value)} aria-label={label} title={label}>
+			{options.map(([v, l]) => <option key={v} value={v}>{v === '' ? l : l}</option>)}
+		</select>
+	);
+}
+
 const load = (): F => { try { return { ...EMPTY, ...JSON.parse(localStorage.getItem(KEY) || '{}') }; } catch { return EMPTY; } };
 
 export default function Drafts() {
@@ -65,59 +76,30 @@ export default function Drafts() {
 				/>
 			)}
 
-			<Card className="mb-16 reply-filters">
-				<div className="row wrap" style={{ gap: 10 }}>
-					<Segmented value={status} onChange={setStatus} options={[{ v: 'draft', l: `To send${data?.counts?.draft ? ` (${data.counts.draft.toLocaleString('en-IN')})` : ''}` }, { v: 'sent', l: `Sent${data?.counts?.sent ? ` (${data.counts.sent})` : ''}` }, { v: 'dismissed', l: 'Dismissed' }]} />
-					<div className="row" style={{ position: 'relative', flex: '1 1 260px' }}>
-						<MdSearch style={{ position: 'absolute', left: 10, color: 'var(--text-3)' }} />
-						<input className="input" style={{ paddingLeft: 32, width: '100%' }} placeholder="Search name, email address, subject or reply text" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search replies" />
-					</div>
-					<select className="input" style={{ width: 170 }} value={f.sort} onChange={(e) => set({ sort: e.target.value })} aria-label="Sort">
-						<option value="priority">Sort: red first</option>
-						<option value="newest">Sort: newest</option>
-						<option value="oldest">Sort: oldest</option>
-						<option value="ready">Sort: ready first</option>
-					</select>
-					{active > 0 && <button className="btn ghost sm" onClick={() => { setSearch(''); set({ ...EMPTY, sort: f.sort }); }}><MdRefresh /> Clear filters ({active})</button>}
+			<div className="row-between mb-8">
+				<Segmented value={status} onChange={setStatus} options={[{ v: 'draft', l: `To send${data?.counts?.draft ? ` (${data.counts.draft.toLocaleString('en-IN')})` : ''}` }, { v: 'sent', l: `Sent${data?.counts?.sent ? ` (${data.counts.sent})` : ''}` }, { v: 'dismissed', l: 'Dismissed' }]} />
+			</div>
+			<div className="filter-strip mb-16">
+				<div className="search-box">
+					<MdSearch />
+					<input className="input sm" placeholder="Search name, email, subject or text" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search replies" />
 				</div>
-				<div className="filter-rows">
-					<span className="lbl">Received</span>
-					<Chips single value={f.waiting ? [f.waiting] : []} onChange={(v) => set({ waiting: v[0] || '' })}
-						options={[{ v: '1', l: 'Last day', n: fc.today }, { v: '7', l: 'Last 7 days', n: fc.week }, { v: '30', l: 'Last 30 days' }, { v: '90', l: 'Last 90 days' }]} />
-					<span className="lbl">Criticality</span>
-					<div className="row wrap" style={{ gap: 8 }}>
-						<Chips value={f.rag} onChange={(v) => set({ rag: v })}
-							options={[{ v: 'red', l: 'Red', n: fc.red, tone: 'red' }, { v: 'amber', l: 'Amber', n: fc.amber, tone: 'amber' }, { v: 'green', l: 'Green', n: fc.green, tone: 'green' }]} />
-						<select className="input sm" style={{ width: 150 }} value={f.urgency} onChange={(e) => set({ urgency: e.target.value })} aria-label="Urgency">
-							<option value="">Any urgency</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option>
-						</select>
-					</div>
-					<span className="lbl">Status</span>
-					<Chips single value={f.ready ? [f.ready] : []} onChange={(v) => set({ ready: v[0] || '' })}
-						options={[{ v: 'yes', l: 'Ready to send', n: fc.ready }, { v: 'no', l: 'Needs information', n: fc.total !== undefined ? fc.total - (fc.ready || 0) : undefined }]} />
-					<span className="lbl">Category</span>
-					<div className="row wrap" style={{ gap: 8 }}>
-						<select className="input sm" style={{ width: 260 }} value={f.type} onChange={(e) => set({ type: e.target.value, sub: '' })} aria-label="Group">
-							<option value="">All groups</option>
-							{Object.entries(BUSINESS_LABELS).map(([k, l]) => <option key={k} value={k}>{l}{groupCount(k) ? ` (${groupCount(k)})` : ''}</option>)}
-						</select>
-						<select className="input sm" style={{ width: 240 }} value={f.sub} disabled={!f.type} onChange={(e) => set({ sub: e.target.value })} aria-label="Subgroup">
-							<option value="">{f.type ? 'All subgroups' : 'Choose a group first'}</option>
-							{subs.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-						</select>
-						<select className="input sm" style={{ width: 230 }} value={f.mailbox} onChange={(e) => set({ mailbox: e.target.value })} aria-label="Mailbox">
-							<option value="">All mailboxes</option>
-							{(opts.data?.mailboxes || []).map((m: any) => <option key={m.id} value={m.id}>{m.address}</option>)}
-						</select>
-					</div>
-				</div>
-			</Card>
+				<Drop label="Received" value={f.waiting} onChange={(v) => set({ waiting: v })} options={[['', 'Any time'], ['1', `Last day${num(fc.today)}`], ['7', `Last 7 days${num(fc.week)}`], ['30', 'Last 30 days'], ['90', 'Last 90 days']]} />
+				<Drop label="Rating" value={f.rag[0] || ''} onChange={(v) => set({ rag: v ? [v] : [] })} options={[['', 'Any rating'], ['red', `Red${num(fc.red)}`], ['amber', `Amber${num(fc.amber)}`], ['green', `Green${num(fc.green)}`]]} />
+				<Drop label="Urgency" value={f.urgency} onChange={(v) => set({ urgency: v })} options={[['', 'Any urgency'], ['critical', 'Critical'], ['high', 'High'], ['medium', 'Medium'], ['low', 'Low']]} />
+				<Drop label="Status" value={f.ready} onChange={(v) => set({ ready: v })} options={[['', 'Any status'], ['yes', `Ready to send${num(fc.ready)}`], ['no', `Needs information${fc.total !== undefined ? num(fc.total - (fc.ready || 0)) : ''}`]]} />
+				<Drop label="Group" value={f.type} onChange={(v) => set({ type: v, sub: '' })} options={[['', 'All groups'], ...Object.entries(BUSINESS_LABELS).map(([k, l]) => [k, `${l}${num(groupCount(k))}`] as [string, string])]} />
+				{f.type && <Drop label="Subgroup" value={f.sub} onChange={(v) => set({ sub: v })} options={[['', 'All subgroups'], ...subs.map((x) => [x.key, x.label] as [string, string])]} />}
+				<Drop label="Mailbox" value={f.mailbox} onChange={(v) => set({ mailbox: v })} options={[['', 'All mailboxes'], ...(opts.data?.mailboxes || []).map((m: any) => [String(m.id), m.address] as [string, string])]} />
+				{active > 0 && <button className="btn ghost sm" onClick={() => { setSearch(''); set({ ...EMPTY, sort: f.sort }); }}><MdRefresh /> Clear ({active})</button>}
+			</div>
 
 			{isLoading ? <Loader text="Loading replies" /> : !rows.length ? (
 				<Card><Empty text={status === 'draft' ? (active ? 'No replies match these filters.' : 'Nothing waiting. New drafts appear here as soon as an email needs a reply.') : 'Nothing here yet.'} /></Card>
 			) : (
 				<div className="drafts-layout">
-					<Card flush className="drafts-list" title={<span className="small"><b>{(data.total || rows.length).toLocaleString('en-IN')}</b> {status === 'draft' ? 'to send' : status}{data.total > rows.length ? `, first ${rows.length} shown` : ''}{isFetching ? ' · updating' : ''}</span>}>
+					<Card flush className="drafts-list" title={<span className="small"><b>{(data.total || rows.length).toLocaleString('en-IN')}</b> {status === 'draft' ? 'to send' : status}{data.total > rows.length ? `, first ${rows.length} shown` : ''}{isFetching ? ' · updating' : ''}</span>}
+						actions={<Drop label="Sort" value={f.sort} onChange={(v) => set({ sort: v })} options={[['priority', 'Red first'], ['newest', 'Newest'], ['oldest', 'Oldest'], ['ready', 'Ready first']]} />}>
 						{rows.map((r) => {
 							const n = countPlaceholders(r.body);
 							return (
@@ -128,7 +110,7 @@ export default function Drafts() {
 										<span className="xs faint nowrap">{ago(status === 'sent' ? r.sent_at : r.last_inbound_at)}</span>
 									</div>
 									<div className="small truncate">{r.conv_subject || '(no subject)'}</div>
-									<div className="row xs wrap" style={{ gap: 6, marginTop: 4 }}>
+									<div className="tag-line xs" style={{ marginTop: 4 }}>
 										<span className="chip">{subLabel(r.business_category, r.subcategory) || bizLabel(r.business_category)}</span>
 										{status === 'draft' && (n > 0 ? <span className="badge amber">{n} to fill in</span> : <span className="badge green">Ready to send</span>)}
 									</div>

@@ -512,4 +512,12 @@ create index if not exists reference_items_org_kind_idx on reference_items (org_
 create unique index if not exists reference_items_code_uq on reference_items (org_id, kind, code) where code is not null;
 -- existing threads get a subgroup from the rules engine in the background (no AI cost); new mail gets it from the AI
 ` },
+{ id: '009_customer_profiles', sql: String.raw`
+-- customer database: what is known about each reader, bookseller, institution or supplier, gathered from their emails
+alter table customers add column if not exists profile jsonb not null default '{}';
+alter table customers add column if not exists profile_manual jsonb not null default '{}';
+alter table customers add column if not exists profile_source text;
+alter table customers add column if not exists profile_at timestamptz;
+create index if not exists customers_profile_at_idx on customers (org_id, profile_at);
+` },
 ];

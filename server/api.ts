@@ -24,6 +24,7 @@ import { appUrl, emailLayout, esc, mailerProvider, sendEmail } from './mailer';
 import { buildReport, runSchedule } from './reports';
 import { ask, SUGGESTED_QUESTIONS } from './copilot';
 import { loadDemoData, clearDemoData, demoEnabled } from './demo';
+import { buildProfile, listCustomerDb, merged as mergedProfile, updateProfile } from './profiles';
 import { listTemplates, resetTemplate, updateTemplate } from './templates';
 import { deleteReference, importCsv, listReference, matchReference, TEMPLATES_CSV, type RefKind } from './reference';
 import { normaliseSubcategory, subgroupOf, taxonomyTree } from './ai/taxonomy';
@@ -1305,6 +1306,31 @@ r.post('/api/system/old-unanswered', async (ctx) => {
 	}
 	await audit(ctx, 'conversations.old_unanswered_cleared', 'conversation', null, { days, threads: ids.length });
 	return { threads: ids.length };
+});
+
+// ── Customer database (Admin) ───────────────────────────────────────────────
+r.get('/api/customer-db', async (ctx) => {
+	requireRole(ctx.user, 'analyst');
+	const res = await listCustomerDb(ctx.user!.orgId, ctx.query);
+	if (ctx.query.get('format') !== 'csv') return res;
+	const cols = ['name', 'type', 'organisation', 'emails', 'phones', 'address', 'city', 'state', 'pin', 'language', 'order_refs', 'subscriber_numbers', 'books', 'gstin', 'threads', 'waiting', 'first_contact', 'last_contact_at', 'notes'];
+	const cell = (v: any) => { const s = Array.isArray(v) ? v.join('; ') : v instanceof Date ? v.toISOString().slice(0, 10) : v === null || v === undefined ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+	const lines = [cols.join(','), ...res.rows.map((r: any) => cols.map((c) => cell(c in r.p ? (r.p as any)[c] : r[c])).join(','))];
+	await audit(ctx, 'export.customer_db', 'customer', null, { rows: res.rows.length });
+	return new Response(lines.join('\n'), { headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="gitamail-customers-${new Date().toISOString().slice(0, 10)}.csv"` } });
+});
+r.patch('/api/customer-db/:id', async (ctx) => {
+	requireRole(ctx.user, 'analyst');
+	const res = await updateProfile(ctx.user!.orgId, Number(ctx.params.id), ctx.body || {});
+	await audit(ctx, 'customer.profile_edited', 'customer', Number(ctx.params.id), { fields: Object.keys(ctx.body || {}) });
+	return res;
+});
+r.post('/api/customer-db/:id/refresh', async (ctx) => {
+	requireRole(ctx.user, 'analyst');
+	const c = await one<any>('select id from customers where id=$1 and org_id=$2', [Number(ctx.params.id), ctx.user!.orgId]);
+	if (!c) throw new HttpError(404, 'Customer not found');
+	const res = await buildProfile(c.id, ctx.body?.ai !== false);
+	return { ...res, customer: await one<any>('select * from customers where id=$1', [c.id]).then((r) => ({ ...r, p: mergedProfile(r) })) };
 });
 
 r.post('/api/system/demo', async (ctx) => {

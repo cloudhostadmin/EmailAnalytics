@@ -130,6 +130,21 @@ const byCode = await matchReference(orgId, 'Shrimad Bhagwat Mahapuran khand dono
 assert.ok(byCode.some((m) => /Mahapuran/.test(m.title) && /binding Hardbound/.test(m.text)), `short book code and extra columns: ${JSON.stringify(byCode)}`);
 assert.ok((await matchReference(orgId, 'पुस्तक कोड 26 उपलब्ध है?')).some((m) => /Mahapuran/.test(m.title)), 'Hindi code cited');
 
+// customer database: the rules engine reads phone, address, PIN, subscriber number and language
+const { rulesProfile, buildProfile, listCustomerDb } = await import('../server/profiles');
+const rp = rulesProfile(['Kalyan issue missing\nमेरी ग्राहक संख्या 74013 है। अक्टूबर का अंक नहीं मिला।\nRamesh Sharma\n12, Gandhi Nagar, Near Hanuman Mandir\nJaipur, Rajasthan 302015\nMob 98290 12345'], { orders: ['GP-2610444'], books: [] }, 'r@gmail.com');
+assert.equal(rp.pin, '302015');
+assert.deepEqual(rp.phones, ['9829012345']);
+assert.equal(rp.state, 'Rajasthan');
+assert.ok(rp.address?.includes('Gandhi Nagar'), `address: ${rp.address}`);
+assert.deepEqual(rp.subscriber_numbers, ['74013']);
+assert.equal(rp.language, 'Hindi');
+const anyCustomer = await one<any>('select customer_id from conversations where customer_id is not null limit 1');
+const bp = await buildProfile(anyCustomer.customer_id, false);
+assert.equal(bp.source, 'rules');
+const db = await listCustomerDb(orgId, new URLSearchParams({ q: '' }));
+assert.ok(db.totals.total >= 1 && db.rows[0].p);
+
 // cold marketing is not waiting for a reply
 const promo = heuristicAnalyse(input('Grow your business with our digital marketing and SEO services. Free listing for your books. Click to unsubscribe.', "Don't Just Advertise. Create Opportunities for Growth."));
 assert.equal(promo.requires_reply, false);

@@ -20,7 +20,6 @@ export default function ConversationDetail() {
 	const toast = useToast();
 	const qc = useQueryClient();
 	const opts = useFilterOptions();
-	const [note, setNote] = useState('');
 	const [showDupes, setShowDupes] = useState(false);
 	const [newestFirst, setNewestFirst] = useState(true);
 	const { data, isLoading, error } = useQuery({ queryKey: ['conversation', id], queryFn: () => api(`/conversations/${id}`) });
@@ -32,7 +31,6 @@ export default function ConversationDetail() {
 	};
 	const update = useMutation({ mutationFn: (body: any) => api(`/conversations/${id}`, { method: 'PATCH', body }), onSuccess: () => { refresh(); toast('Conversation updated'); }, onError: (e: any) => toast(e.message, 'error') });
 	const reanalyse = useMutation({ mutationFn: () => api(`/conversations/${id}/reanalyse`, { body: {} }), onSuccess: () => { refresh(); toast('Re-analysed'); }, onError: (e: any) => toast(e.message, 'error') });
-	const addNote = useMutation({ mutationFn: () => api(`/conversations/${id}/notes`, { body: { body: note } }), onSuccess: () => { setNote(''); refresh(); } });
 	const [newAction, setNewAction] = useState<{ description: string; dueDate: string } | null>(null);
 	const addAction = useMutation({
 		mutationFn: () => api('/actions', { body: { ...newAction, conversationId: Number(id) } }),
@@ -57,7 +55,7 @@ export default function ConversationDetail() {
 			<button className="btn ghost sm mb-8" onClick={() => nav(-1)}><MdArrowBack /> Back</button>
 			<div className="page-head detail-head">
 				<div className="grow">
-					<div className="row wrap mb-8">
+					<div className="tag-line mb-8">
 						<span className="badge" style={{ background: (BUSINESS_COLORS[c.business_category] || '#ccc') + '22', color: 'var(--text)' }}>{bizLabel(c.business_category)}{subLabel(c.business_category, c.subcategory) ? ` · ${subLabel(c.business_category, c.subcategory)}` : ''}</span>
 						{c.is_internal && <span className="badge navy">Internal</span>}
 						{c.is_automated && <span className="badge">Automated</span>}
@@ -100,10 +98,17 @@ export default function ConversationDetail() {
 
 			<div className="grid g-2-1">
 				<div className="col gap-16">
-					{draftQ.data?.draft && ['draft', 'sent'].includes(draftQ.data.draft.status) && (
-						<Card title={<h2><span className="kw">Reply</span> {draftQ.data.draft.status === 'sent' ? 'sent' : 'draft'}</h2>} accent={COLORS.pink}
-							sub="Kept here until you press Send, then sent from Gmail in this thread. The conversation is below.">
+					{draftQ.data?.draft ? (
+						<Card title={<h2><span className="kw">Reply</span> {({ draft: 'draft', sent: 'sent', dismissed: 'dismissed', replied_elsewhere: 'answered in Gmail' } as any)[draftQ.data.draft.status] || 'draft'}</h2>}
+							sub={draftQ.data.draft.status === 'draft' ? 'Kept here until you press Send, then sent from Gmail in this thread. The conversation is below.' : draftQ.data.draft.status === 'sent' ? undefined : 'Not sent. Edit and save to bring it back to Replies to send.'}>
 							<DraftEditor draft={draftQ.data.draft} compact />
+						</Card>
+					) : !draftQ.isLoading && (
+						<Card title={<h2><span className="kw">Reply</span></h2>}>
+							<div className="row-between small">
+								<span className="muted">{c.awaiting_reply ? 'A reply has not been drafted yet; it is written when the thread is analysed.' : 'No reply is needed: the latest message is from Gita Press, or does not ask for anything.'}</span>
+								{can('analyst') && <button className="btn sm" onClick={() => reanalyse.mutate()} disabled={reanalyse.isPending}><MdRefresh /> {reanalyse.isPending ? 'Analysing…' : 'Analyse again'}</button>}
+							</div>
 						</Card>
 					)}
 					<Card accent={COLORS.pink}>
@@ -167,31 +172,19 @@ export default function ConversationDetail() {
 							</div>
 						</Card>
 					)}
-					<Card title="Details" accent={COLORS.navy}>
+					<Card title="Details">
 						<div className="kv">
-							<span className="k">Customer health</span><span><Health score={c.customer_health} /></span>
-							<span className="k">Customer state</span><span><StateBadge s={c.customer_state} /></span>
+							{c.customer_id && <><span className="k">Reader health</span><span><Health score={c.customer_health} /></span></>}
 							<span className="k">Escalation risk</span><span><b>{c.escalation_risk ?? 'n/a'}</b>/100</span>
 							<span className="k">Priority</span><span><b>{c.priority_score}</b>/100</span>
-							<span className="k">First response</span><span>{minutes(c.first_response_minutes)}</span>
-							<span className="k">Issue types</span><span className="row wrap gap-4">{(c.categories || []).map((x: string) => <span key={x} className="chip">{catLabel(x)}</span>)}</span>
-							{c.topics?.length > 0 && <><span className="k">Topics</span><span className="small">{c.topics.join(', ')}</span></>}
+							<span className="k">First reply</span><span>{c.first_response_minutes != null ? minutes(c.first_response_minutes) : 'Not replied yet'}</span>
 							<span className="k">Assigned to</span><span>{c.assignee_name || 'Unassigned'}</span>
+							{entityGroups.map(([k, v]) => (
+								<Fragment key={k}><span className="k">{k}</span><span className="row wrap gap-4">{v.map((x) => <span key={x} className="chip mono">{x}</span>)}</span></Fragment>
+							))}
 						</div>
 					</Card>
 
-					{data.issues.length > 0 && (
-						<Card title="Issues detected" accent={COLORS.amber}>
-							<div className="col gap-12">
-								{data.issues.map((i: any) => (
-									<div key={i.id}>
-										<div className="row"><span className={`badge ${i.severity === 'critical' || i.severity === 'high' ? 'red' : i.severity === 'medium' ? 'amber' : ''}`}>{i.severity}</span><b>{catLabel(i.category)}</b></div>
-										<div className="small muted mt-8">{i.description}</div>
-									</div>
-								))}
-							</div>
-						</Card>
-					)}
 
 					<Card title="Actions and commitments" accent={COLORS.general}
 						actions={can('analyst') && <button className="btn sm" onClick={() => setNewAction({ description: '', dueDate: '' })}><MdAdd /> Add</button>}>
@@ -230,32 +223,7 @@ export default function ConversationDetail() {
 					</Card>
 
 
-					{entityGroups.length > 0 && (
-						<Card title="Key references" accent={COLORS.teal}>
-							<div className="kv">
-								{entityGroups.map(([k, v]) => (
-									<Fragment key={k}><span className="k">{k}</span><span className="row wrap gap-4">{v.map((x) => <span key={x} className="chip mono">{x}</span>)}</span></Fragment>
-								))}
-							</div>
-						</Card>
-					)}
 
-					<Card title="Team notes" accent={COLORS.purple}>
-						<div className="col gap-12">
-							{data.notes.map((n: any) => (
-								<div key={n.id} className="small">
-									<div style={{ whiteSpace: 'pre-wrap' }}>{n.body}</div>
-									<div className="xs faint">{n.author} · {ago(n.created_at)}</div>
-								</div>
-							))}
-							{can('analyst') && (
-								<>
-									<textarea className="input" placeholder="Add a note for the team" value={note} onChange={(e) => setNote(e.target.value)} />
-									<button className="btn sm" style={{ alignSelf: 'flex-end' }} disabled={!note.trim() || addNote.isPending} onClick={() => addNote.mutate()}>Add note</button>
-								</>
-							)}
-						</div>
-					</Card>
 
 					{data.alerts.length > 0 && (
 						<Card title="Alerts raised" accent={COLORS.red}>

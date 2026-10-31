@@ -5,6 +5,7 @@ import { guessSubcategory, heuristicAnalyse } from './ai/heuristic';
 import { normaliseSubcategory } from './ai/taxonomy';
 import { getTemplate, renderTemplate, templatesForGroup } from './templates';
 import { matchReference } from './reference';
+import { profileForPrompt } from './profiles';
 import type { ThreadInput } from './ai/types';
 import { getOrg } from './settings';
 import { score, healthScore, healthStatus } from './scoring';
@@ -66,6 +67,7 @@ export async function analyseConversation(conversationId: number): Promise<numbe
 		isAutomated: !!conv.is_automated,
 		replyKnowledge: org.settings.replyKnowledge || '',
 		replySignature: org.settings.replySignature || '',
+		customerProfile: conv.customer_id ? profileForPrompt((await one<any>('select profile, profile_manual from customers where id=$1', [conv.customer_id])) || {}) : '',
 		messages: emails.map((e, idx) => {
 			const body = (e.body_clean || e.body_text || '').slice(0, 3000);
 			return {

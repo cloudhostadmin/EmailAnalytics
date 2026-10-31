@@ -113,6 +113,8 @@ export interface ThreadInput {
 	replySignature?: string;
 	/** default reply templates for the likely subgroup(s), as plain text */
 	replyTemplates?: { group: string; subgroup: string; label: string; body: string }[];
+	/** what the customer database knows about this reader (address, subscriber no., language) */
+	customerProfile?: string;
 	/** matched catalogue, FAQ and policy entries from the reference data */
 	reference?: { kind: string; title: string; text: string }[];
 }
