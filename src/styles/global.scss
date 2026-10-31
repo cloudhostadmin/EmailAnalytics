@@ -10,7 +10,7 @@
 	--green: #16A34A;
 	--red: #DC2626;
 
-	--bg: #F8FAFC;
+	--bg: #EEF1F6;
 	--card: #ffffff;
 	--text: #0F172A;
 	--text-2: #475569;
@@ -2216,4 +2216,80 @@ table.table {
 }
 h1 .kw, h2 .kw, .kw {
 	color: #4F46E5;
+}
+
+// ── Deep indigo sidebar, light slate page, white sections ─────────────────
+body {
+	background: #EEF1F6;
+}
+.aside {
+	background: #1E1B4B;
+	color: #E0E7FF;
+	box-shadow: none;
+	.aside-head {
+		.brand { color: #fff; }
+		.brand-logo { background: #fff; box-shadow: none; }
+		.brand-name { color: #fff; span { color: #A5B4FC; } }
+		.brand-sub { color: rgba(224, 231, 255, 0.55); }
+	}
+	.aside-toggle {
+		background: rgba(255, 255, 255, 0.08);
+		color: #E0E7FF;
+		&:hover { background: rgba(255, 255, 255, 0.16); }
+	}
+	.aside-section { color: rgba(199, 210, 254, 0.5); }
+	.nav-item {
+		color: rgba(224, 231, 255, 0.8);
+		&:hover { background: rgba(255, 255, 255, 0.07); color: #fff; }
+		&.active {
+			background: #4F46E5;
+			color: #fff;
+			box-shadow: 0 4px 12px rgba(79, 70, 229, 0.35);
+			svg { color: #fff; }
+		}
+		.nav-badge { background: rgba(165, 180, 252, 0.18); color: #E0E7FF; }
+	}
+	.nav-item.active .nav-badge { background: #fff; color: #4338CA; }
+	.aside-foot {
+		border-top: 1px solid rgba(255, 255, 255, 0.08);
+		color: rgba(224, 231, 255, 0.5);
+		img { filter: brightness(0) invert(1); opacity: 0.7; }
+	}
+}
+.app.aside-min .aside .aside-section::after {
+	background: rgba(255, 255, 255, 0.14);
+}
+.header {
+	background: #fff;
+	box-shadow: 0 1px 0 #E2E8F0;
+}
+.card,
+.story,
+.filter-strip,
+.filterbar {
+	background: #fff;
+	box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 0 0 1px rgba(15, 23, 42, 0.05);
+}
+.story {
+	border-left: 4px solid #6366F1;
+}
+.story-chip {
+	background: #EEF2FF;
+	color: #4338CA;
+}
+.story-next {
+	background: #F5F7FF;
+}
+.kanban-col {
+	background: #E4E8F0;
+}
+table.table tbody tr:nth-child(even) td {
+	background: #F8FAFC;
+}
+.facts > div {
+	background: #F5F7FA;
+}
+.tabs button.on,
+.tabs button[aria-selected='true'] {
+	color: #4338CA;
 }
