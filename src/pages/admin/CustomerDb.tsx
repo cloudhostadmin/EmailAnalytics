@@ -86,7 +86,7 @@ export default function CustomerDb() {
 											<td style={{ maxWidth: 260 }}><b className="truncate" style={{ display: 'block' }}>{r.name}</b><div className="xs faint truncate">{r.p.organisation || r.p.emails?.[0]}</div></td>
 											<td className="small nowrap">{TYPES[r.p.type || r.kind] || r.p.type || r.kind}</td>
 											<td className="small mono nowrap">{r.p.phones?.[0] || <span className="faint">–</span>}</td>
-											<td className="small" style={{ maxWidth: 200 }}>{[r.p.city, r.p.state, r.p.pin].filter(Boolean).join(', ') || <span className="faint">–</span>}</td>
+											<td className="small" style={{ maxWidth: 200 }}>{[r.p.city, r.p.state || r.enrichment?.region?.pin_state, r.p.pin].filter(Boolean).join(', ') || <span className="faint">–</span>}{r.enrichment?.possible_duplicates?.length ? <div className="xs" style={{ color: 'var(--amber)' }}>Possible duplicate</div> : null}</td>
 											<td className="small">{r.p.language || <span className="faint">–</span>}</td>
 											<td className="xs" style={{ maxWidth: 220 }}>
 												{r.p.subscriber_numbers?.length > 0 && <div className="truncate">Kalyan {r.p.subscriber_numbers.join(', ')}</div>}
@@ -165,6 +165,7 @@ function CustomerModal({ c, onClose }: { c: any; onClose: () => void }) {
 							<FragmentRow key={k} k={l} v={LIST_FIELDS.includes(k) ? (p[k] || []).join(', ') : p[k]} edited={k in manual} />
 						))}
 					</div>
+					<Enrichment e={cur.enrichment} />
 				</>
 			)}
 		</Modal>
@@ -177,3 +178,32 @@ const FragmentRow = ({ k, v, edited }: { k: string; v: any; edited: boolean }) =
 		<span className={v ? '' : 'faint'}>{v || 'Not known'}{edited && <span className="badge" style={{ marginLeft: 6 }}>edited</span>}</span>
 	</>
 );
+
+/** What Gita Mail adds: activity, region from PIN or GSTIN, possible duplicates, an organisation's website. */
+function Enrichment({ e }: { e: any }) {
+	if (!e || !e.activity) return <div className="small faint mt-16">Enrichment is added in the background within a few minutes.</div>;
+	const a = e.activity;
+	const r = e.region || {};
+	return (
+		<div className="mt-16">
+			<h3 className="report-sub mb-8">What Gita Mail adds</h3>
+			<Facts items={[
+				['Emails from them', a.emails_from_them],
+				['Waiting for a reply', a.waiting],
+				['Red threads', a.red],
+				['Average first reply', a.avg_first_reply_hours != null ? `${a.avg_first_reply_hours} h` : ''],
+				['Usually writes to', a.usual_mailbox],
+				['Last reply sent from Gita Mail', a.last_reply_sent ? fmtDate(a.last_reply_sent) : ''],
+			]} />
+			<div className="kv mt-16">
+				{a.groups?.length > 0 && <><span className="k">Writes about</span><span>{a.groups.map((g: any) => `${g.label} (${g.n})`).join(', ')}</span></>}
+				{(r.pin_state || r.gst_state) && <><span className="k">Region</span><span>{[r.pin_state && `${r.pin_state} (from PIN code)`, r.gst_state && `${r.gst_state} (from GSTIN)`].filter(Boolean).join(' · ')}{r.mismatch && <span className="badge amber" style={{ marginLeft: 6 }}>PIN and state differ</span>}</span></>}
+				{r.gst_entity && <><span className="k">GSTIN holder</span><span>{r.gst_entity}</span></>}
+				{e.website && <><span className="k">Website</span><span><a href={e.website.url} target="_blank" rel="noreferrer">{e.website.title || e.org_domain}</a>{e.website.description && <div className="small muted">{e.website.description}</div>}</span></>}
+				{!e.website && e.org_domain && <><span className="k">Organisation domain</span><span>{e.org_domain} <span className="faint small">(no website information found)</span></span></>}
+				{e.possible_duplicates?.length > 0 && <><span className="k">Same phone or address</span><span>{e.possible_duplicates.map((d: any) => <Link key={d.id} to={`/customers/${d.id}`} style={{ marginRight: 10 }}>{d.name}</Link>)}</span></>}
+			</div>
+			<div className="xs faint mt-8">Readers are not looked up on the internet; only what they wrote to Gita Press is used. Organisations with their own email domain get their public website details.</div>
+		</div>
+	);
+}

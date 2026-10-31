@@ -24,6 +24,7 @@ import { appUrl, emailLayout, esc, mailerProvider, sendEmail } from './mailer';
 import { buildReport, runSchedule } from './reports';
 import { ask, SUGGESTED_QUESTIONS } from './copilot';
 import { loadDemoData, clearDemoData, demoEnabled } from './demo';
+import { enrichCustomer } from './enrich';
 import { buildProfile, listCustomerDb, merged as mergedProfile, updateProfile } from './profiles';
 import { listTemplates, resetTemplate, updateTemplate } from './templates';
 import { deleteReference, importCsv, listReference, matchReference, TEMPLATES_CSV, type RefKind } from './reference';
@@ -725,10 +726,10 @@ r.get('/api/alerts', async (ctx) => {
 	if (status !== 'all') { params.push(status); where += ` and a.status=$${params.length}`; }
 	if (scope) { params.push(scope); where += ` and (a.conversation_id is null or c.mailbox_ids && $${params.length}::bigint[])`; }
 	const rows = await q<any>(
-		`select a.*, cu.name as customer_name, c.subject, c.rag, r.name as rule_name, u.full_name as acknowledged_by_name
+		`select a.*, cu.name as customer_name, c.subject, c.rag, c.business_category, c.mailbox_ids, r.name as rule_name, r.rule_type, u.full_name as acknowledged_by_name
 		   from alerts a left join conversations c on c.id=a.conversation_id left join customers cu on cu.id=a.customer_id
 		   left join alert_rules r on r.id=a.rule_id left join users u on u.id=a.acknowledged_by
-		  where ${where} order by case a.severity when 'critical' then 0 when 'high' then 1 else 2 end, a.created_at desc limit 300`,
+		  where ${where} order by case a.severity when 'critical' then 0 when 'high' then 1 else 2 end, a.created_at desc limit 1000`,
 		params,
 	);
 	const counts = await one<any>(
@@ -1330,6 +1331,7 @@ r.post('/api/customer-db/:id/refresh', async (ctx) => {
 	const c = await one<any>('select id from customers where id=$1 and org_id=$2', [Number(ctx.params.id), ctx.user!.orgId]);
 	if (!c) throw new HttpError(404, 'Customer not found');
 	const res = await buildProfile(c.id, ctx.body?.ai !== false);
+	await enrichCustomer(c.id, { web: true }).catch((e) => console.error('[enrich]', e.message));
 	return { ...res, customer: await one<any>('select * from customers where id=$1', [c.id]).then((r) => ({ ...r, p: mergedProfile(r) })) };
 });
 

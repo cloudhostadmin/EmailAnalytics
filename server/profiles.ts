@@ -192,7 +192,7 @@ export async function listCustomerDb(orgId: number, qs: URLSearchParams) {
 	const offset = Math.max(0, Number(qs.get('offset')) || 0);
 	const W = where.join(' and ');
 	const rows = await q<any>(
-		`select c.id, c.name, c.kind, c.tier, c.health_score, c.health_status, c.last_contact_at, c.profile, c.profile_manual, c.profile_source, c.profile_at,
+		`select c.id, c.name, c.kind, c.tier, c.health_score, c.health_status, c.last_contact_at, c.profile, c.profile_manual, c.profile_source, c.profile_at, c.enrichment, c.enriched_at,
 		        (select count(*) from conversations cv where cv.customer_id=c.id)::int as threads,
 		        (select count(*) from conversations cv where cv.customer_id=c.id and cv.awaiting_reply and cv.status in ('open','in_progress'))::int as waiting,
 		        (select min(cv.first_message_at) from conversations cv where cv.customer_id=c.id) as first_contact

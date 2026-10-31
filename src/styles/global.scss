@@ -10,14 +10,14 @@
 	--green: #2E8B57;
 	--red: #C62828;
 
-	--bg: #F5F5F3;
+	--bg: #FAFAF9;
 	--card: #ffffff;
 	--text: #1E1205;
 	--text-2: #5E4A3A;
 	--text-3: #9A8670;
-	--border: #E6E1DA;
-	--border-2: #F0ECE6;
-	--hover: #FAF8F5;
+	--border: #ECEAE6;
+	--border-2: #F4F3F1;
+	--hover: #FAFAF9;
 
 	--radius: 12px;
 	--radius-sm: 10px;
@@ -2075,4 +2075,90 @@ textarea.input.tpl-edit {
 	max-width: 130px;
 	padding: 4px 24px 4px 8px;
 	font-size: 12px;
+}
+
+// ── White base, fewer lines: soft shadows instead of borders, no row rules ──
+.card,
+.story,
+.filter-strip,
+.filterbar {
+	border: 0;
+	box-shadow: 0 1px 2px rgba(30, 18, 5, 0.04), 0 0 0 1px rgba(30, 18, 5, 0.035);
+}
+.header {
+	border-bottom: 0;
+	box-shadow: 0 1px 0 rgba(30, 18, 5, 0.04);
+}
+table.table {
+	th {
+		background: transparent;
+		border-bottom: 1px solid var(--border-2);
+		font-weight: 600;
+	}
+	td {
+		border-bottom: 0;
+		padding-top: 10px;
+		padding-bottom: 10px;
+	}
+	tbody tr:nth-child(even) td {
+		background: #FCFCFB;
+	}
+}
+.list-item {
+	border-top: 0;
+	& + .list-item {
+		border-top: 1px solid var(--border-2);
+	}
+}
+.drafts-layout .draft-item {
+	border-bottom: 0;
+	& + .draft-item {
+		border-top: 1px solid var(--border-2);
+	}
+	&.on {
+		background: #FDF5EE;
+		box-shadow: inset 3px 0 0 var(--pink);
+	}
+}
+.facts > div,
+.info-item textarea.input {
+	border-color: var(--border-2);
+}
+.facts > div {
+	background: #FAFAF9;
+	border: 0;
+}
+.story-next {
+	background: #FAFAF9;
+}
+.story-chip {
+	background: #FBF1EC;
+	border: 0;
+}
+.kanban-col {
+	background: #F6F5F3;
+	border-radius: 12px;
+	padding: 10px;
+	min-height: 200px;
+}
+.kanban-card {
+	padding: 12px;
+	border-left: 3px solid transparent !important;
+	box-shadow: 0 1px 2px rgba(30, 18, 5, 0.05);
+}
+.tabs {
+	border-bottom-color: var(--border-2);
+}
+.kv .k {
+	color: var(--text-3);
+}
+.header .segmented {
+	flex: none;
+	white-space: nowrap;
+}
+.header .header-title {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	min-width: 0;
 }

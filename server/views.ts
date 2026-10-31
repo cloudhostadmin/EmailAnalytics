@@ -129,7 +129,7 @@ export async function proposals(user: SessionUser, qs: URLSearchParams) {
 	const f = await convFilter(user, a);
 	const rows = await q<any>(
 		`select c.id, c.subject, c.summary, c.proposal, coalesce(c.proposal_stage, 'request_received') as stage, c.proposal_stage_locked,
-		        c.last_message_at, c.first_message_at, c.awaiting_reply, c.rag, c.sentiment, c.status, c.is_internal,
+		        c.last_message_at, c.first_message_at, c.awaiting_reply, c.rag, c.sentiment, c.status, c.is_internal, c.mailbox_ids, c.urgency,
 		        cu.id as customer_id, cu.name as customer_name, cu.tier as customer_tier, u.full_name as assignee_name, c.assignee_id
 		   from conversations c left join customers cu on cu.id=c.customer_id left join users u on u.id=c.assignee_id
 		  where ${W(f)} order by (c.proposal->>'deadline') nulls last, c.last_message_at desc limit 500`,

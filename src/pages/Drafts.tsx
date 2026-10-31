@@ -8,20 +8,12 @@ import DraftEditor, { countPlaceholders, placeholderList } from '../components/D
 import { Card, Empty, Facts, Loader, PageHead, RagBadge, RagDot, Segmented, SentimentBadge, Story } from '../components/ui';
 import { BUSINESS_LABELS, COLORS, ago, bizLabel, fmtDateTime } from '../lib/format';
 import { useTaxonomy } from '../lib/taxonomy';
+import { Drop } from '../components/FilterStrip';
 
 interface F { q: string; waiting: string; rag: string[]; ready: string; type: string; sub: string; urgency: string; mailbox: string; sort: string }
 const EMPTY: F = { q: '', waiting: '', rag: [], ready: '', type: '', sub: '', urgency: '', mailbox: '', sort: 'priority' };
 const KEY = 'gitamail_reply_filters';
 const num = (n?: number) => (n !== undefined && n !== null ? ` (${n.toLocaleString('en-IN')})` : '');
-
-/** A compact labelled dropdown; highlighted when a value is chosen. */
-function Drop({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: [string, string][] }) {
-	return (
-		<select className={`input sm drop ${value ? 'on' : ''}`} value={value} onChange={(e) => onChange(e.target.value)} aria-label={label} title={label}>
-			{options.map(([v, l]) => <option key={v} value={v}>{v === '' ? l : l}</option>)}
-		</select>
-	);
-}
 
 const load = (): F => { try { return { ...EMPTY, ...JSON.parse(localStorage.getItem(KEY) || '{}') }; } catch { return EMPTY; } };
 
@@ -48,6 +40,19 @@ export default function Drafts() {
 		else if (!rows.some((r) => r.id === sel)) setSel(rows[0].id);
 	}, [rows, sel]);
 	const cur = rows.find((r) => r.id === sel);
+	// J / K move through the list when not typing
+	useEffect(() => {
+		const h = (e: KeyboardEvent) => {
+			const t = e.target as HTMLElement;
+			if (e.metaKey || e.ctrlKey || e.altKey || /input|textarea|select/i.test(t.tagName) || t.isContentEditable) return;
+			if (e.key !== 'j' && e.key !== 'k') return;
+			const i = rows.findIndex((r) => r.id === sel);
+			const next = rows[Math.max(0, Math.min(rows.length - 1, i + (e.key === 'j' ? 1 : -1)))];
+			if (next) { setSel(next.id); document.querySelector(`[data-draft="${next.id}"]`)?.scrollIntoView({ block: 'nearest' }); }
+		};
+		window.addEventListener('keydown', h);
+		return () => window.removeEventListener('keydown', h);
+	}, [rows, sel]);
 	const active = (Object.keys(EMPTY) as (keyof F)[]).filter((k) => k !== 'sort' && JSON.stringify(f[k]) !== JSON.stringify(EMPTY[k])).length;
 
 	// the yellow item that holds most drafts back
@@ -98,12 +103,12 @@ export default function Drafts() {
 				<Card><Empty text={status === 'draft' ? (active ? 'No replies match these filters.' : 'Nothing waiting. New drafts appear here as soon as an email needs a reply.') : 'Nothing here yet.'} /></Card>
 			) : (
 				<div className="drafts-layout">
-					<Card flush className="drafts-list" title={<span className="small"><b>{(data.total || rows.length).toLocaleString('en-IN')}</b> {status === 'draft' ? 'to send' : status}{data.total > rows.length ? `, first ${rows.length} shown` : ''}{isFetching ? ' · updating' : ''}</span>}
+					<Card flush className="drafts-list" title={<span className="small"><b>{(data.total || rows.length).toLocaleString('en-IN')}</b> {status === 'draft' ? 'to send' : status}{data.total > rows.length ? `, first ${rows.length} shown` : ''}{isFetching ? ' · updating' : ''} <span className="faint xs">· J / K to move</span></span>}
 						actions={<Drop label="Sort" value={f.sort} onChange={(v) => set({ sort: v })} options={[['priority', 'Red first'], ['newest', 'Newest'], ['oldest', 'Oldest'], ['ready', 'Ready first']]} />}>
 						{rows.map((r) => {
 							const n = countPlaceholders(r.body);
 							return (
-								<button key={r.id} className={`draft-item ${r.id === sel ? 'on' : ''}`} onClick={() => setSel(r.id)}>
+								<button key={r.id} data-draft={r.id} className={`draft-item ${r.id === sel ? 'on' : ''}`} onClick={() => setSel(r.id)}>
 									<div className="row" style={{ gap: 8 }}>
 										<RagDot rag={r.rag} />
 										<b className="truncate grow">{r.customer_name || r.to_addresses?.[0]}</b>

@@ -145,6 +145,18 @@ assert.equal(bp.source, 'rules');
 const db = await listCustomerDb(orgId, new URLSearchParams({ q: '' }));
 assert.ok(db.totals.total >= 1 && db.rows[0].p);
 
+// enrichment: public postal and GST codes, activity, and possible duplicates
+const { stateFromPin, gstinInfo, enrichCustomer } = await import('../server/enrich');
+assert.equal(stateFromPin('302015'), 'Rajasthan');
+assert.equal(stateFromPin('273005'), 'Uttar Pradesh');
+assert.equal(stateFromPin('248001'), 'Uttarakhand');
+assert.deepEqual(gstinInfo('09AAATG1234K1Z5'), { state: 'Uttar Pradesh', entity: 'Trust' });
+await q(`update customers set profile = profile || '{"phones":["9829012345"]}' where id in (select id from customers where org_id=$1 order by id limit 2)`, [orgId]);
+const twinIds = (await q<any>('select id from customers where org_id=$1 order by id limit 2', [orgId])).map((r) => r.id);
+const en = await enrichCustomer(twinIds[0], { web: false });
+assert.ok(en && en.activity.threads >= 0);
+assert.ok(en!.possible_duplicates.some((d: any) => d.id === twinIds[1]), 'same phone found as possible duplicate');
+
 // cold marketing is not waiting for a reply
 const promo = heuristicAnalyse(input('Grow your business with our digital marketing and SEO services. Free listing for your books. Click to unsubscribe.', "Don't Just Advertise. Create Opportunities for Growth."));
 assert.equal(promo.requires_reply, false);

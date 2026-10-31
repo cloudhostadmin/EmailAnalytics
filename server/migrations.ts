@@ -520,4 +520,9 @@ alter table customers add column if not exists profile_source text;
 alter table customers add column if not exists profile_at timestamptz;
 create index if not exists customers_profile_at_idx on customers (org_id, profile_at);
 ` },
+{ id: '010_customer_enrichment', sql: String.raw`
+-- what Gita Mail adds to a customer record: activity, region from PIN or GSTIN, possible duplicates, an organisation's own website
+alter table customers add column if not exists enrichment jsonb not null default '{}';
+alter table customers add column if not exists enriched_at timestamptz;
+` },
 ];
