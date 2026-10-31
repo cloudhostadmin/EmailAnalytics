@@ -19,7 +19,8 @@ export async function analysePending(orgId: number, limit = 25, deadline = Date.
 	const retryFallbacks = !(await aiPaused());
 	const rows = await q<{ id: number }>(
 		`select id from conversations where org_id=$1 and message_count > 0
-		   and (needs_analysis or ($3 and analysis_model like '%(fallback)%' and analysed_at < now() - interval '30 minutes'))
+		   and (needs_analysis or ($3 and analysis_model like '%(fallback)%' and analysed_at < now() - interval '30 minutes'
+		     and (awaiting_reply or last_message_at > now() - interval '30 days')))
 		 order by needs_analysis desc, last_message_at desc limit $2`,
 		[orgId, limit, retryFallbacks],
 	);
