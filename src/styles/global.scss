@@ -2293,3 +2293,33 @@ table.table tbody tr:nth-child(even) td {
 .tabs button[aria-selected='true'] {
 	color: #4338CA;
 }
+// sidebar scrolling: a thin visible bar and arrows when there is more menu above or below
+.aside {
+	position: fixed;
+	.aside-body {
+		scrollbar-width: thin;
+		scrollbar-color: rgba(165, 180, 252, 0.45) transparent;
+		&::-webkit-scrollbar { width: 6px; display: block; }
+		&::-webkit-scrollbar-thumb { background: rgba(165, 180, 252, 0.4); border-radius: 6px; }
+		&::-webkit-scrollbar-thumb:hover { background: rgba(165, 180, 252, 0.7); }
+		&::-webkit-scrollbar-track { background: transparent; }
+	}
+	.aside-scroll {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: calc(100% - 24px);
+		margin: 0 12px;
+		height: 26px;
+		border: 0;
+		border-radius: 8px;
+		background: rgba(255, 255, 255, 0.08);
+		color: #E0E7FF;
+		font-size: 20px;
+		cursor: pointer;
+		flex: none;
+		&:hover { background: rgba(255, 255, 255, 0.16); color: #fff; }
+		&.up { margin-bottom: 4px; }
+		&.down { margin-top: 4px; margin-bottom: 6px; }
+	}
+}

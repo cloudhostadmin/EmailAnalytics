@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { MdMenu, MdMenuOpen, MdNotificationsNone, MdSearch, MdLogout, MdPerson, MdSync } from 'react-icons/md';
+import { MdKeyboardArrowDown, MdKeyboardArrowUp, MdMenu, MdMenuOpen, MdNotificationsNone, MdSearch, MdLogout, MdPerson, MdSync } from 'react-icons/md';
 import { menu, titleFor } from '../menu';
 import { useAuth } from '../contexts/AuthContext';
 import { useFilters } from '../contexts/FilterContext';
@@ -24,6 +24,22 @@ export default function Layout() {
 	const loc = useLocation();
 	const nav = useNavigate();
 	const userMenu = useRef<HTMLDivElement>(null);
+	// the menu can be longer than the screen: show arrows when there is more above or below
+	const navRef = useRef<HTMLDivElement>(null);
+	const [more, setMore] = useState({ up: false, down: false });
+	const checkMore = () => {
+		const el = navRef.current;
+		if (!el) return;
+		const up = el.scrollTop > 4;
+		const down = el.scrollTop + el.clientHeight < el.scrollHeight - 4;
+		setMore((m) => (m.up === up && m.down === down ? m : { up, down }));
+	};
+	useEffect(() => {
+		checkMore();
+		window.addEventListener('resize', checkMore);
+		return () => window.removeEventListener('resize', checkMore);
+	});
+	const scrollNav = (dir: number) => navRef.current?.scrollBy({ top: dir * 220, behavior: 'smooth' });
 
 	useEffect(() => setMobileOpen(false), [loc.pathname]);
 	useEffect(() => {
@@ -63,7 +79,8 @@ export default function Layout() {
 						{min ? <MdMenu /> : <MdMenuOpen />}
 					</button>
 				</div>
-				<div className="aside-body">
+				{more.up && <button className="aside-scroll up" onClick={() => scrollNav(-1)} aria-label="Scroll menu up"><MdKeyboardArrowUp /></button>}
+				<div className="aside-body" ref={navRef} onScroll={checkMore}>
 					{menu.map((s) => {
 						const items = s.items.filter((i) => !i.minRole || can(i.minRole));
 						if (!items.length) return null;
@@ -84,6 +101,7 @@ export default function Layout() {
 						);
 					})}
 				</div>
+				{more.down && <button className="aside-scroll down" onClick={() => scrollNav(1)} aria-label="Scroll menu down"><MdKeyboardArrowDown /></button>}
 				<div className="aside-foot">
 					<img src="/ravity-logo.svg" alt="Ravity" />
 					<span>{orgName}</span>
