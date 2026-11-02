@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { api } from '../../api/client';
+import { api, BASE } from '../../api/client';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { MdVisibility, MdVisibilityOff } from 'react-icons/md';
 import { useAuth } from '../../contexts/AuthContext';
@@ -68,7 +68,7 @@ export default function Login() {
 			{ssoError && <div className="notice error mb-16 small">{ssoError}</div>}
 			{cfg.isError && (
 				<div className="notice warn mb-16 small">
-					<span>The server is not fully set up yet. Open <a href="/api/health" target="_blank" rel="noreferrer">the setup check</a> to see what is missing in Netlify.</span>
+					<span>The server is not fully set up yet. Open <a href={`${BASE}/api/health`} target="_blank" rel="noreferrer">the setup check</a> to see what is missing in Netlify.</span>
 				</div>
 			)}
 			{cfg.data?.google && (

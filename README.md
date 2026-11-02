@@ -77,6 +77,8 @@ Gita Mail reads the Gita Press mailboxes (each person's own inbox, plus shared o
 * sign-in
 * reply drafts
 
+**[docs/WINDOWS_SERVER_HOSTING.md](docs/WINDOWS_SERVER_HOSTING.md)**: hosting on the Gita Press Windows server (IIS) at `gitapress.in/emailanalytics` instead of Netlify (`npm start`).
+
 ## Run locally
 
 ```bash

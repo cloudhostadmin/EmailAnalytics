@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { useEffect } from 'react';
+import { BASE } from '../../api/client';
 
 export default function AuthShell({ children }: { children: ReactNode }) {
 	useEffect(() => {
@@ -16,12 +17,12 @@ export default function AuthShell({ children }: { children: ReactNode }) {
 			<div className="auth-side">
 				<div className="auth-card">
 					<div className="auth-brand">
-						<img className="logo" src="/brand/gitapress-logo.png" alt="Gita Press" />
+						<img className="logo" src={`${BASE}/brand/gitapress-logo.png`} alt="Gita Press" />
 						<div className="name"><span>Gita</span> Mail</div>
 						<div className="tag">Email intelligence for readers, orders, Kalyan and every conversation</div>
 					</div>
 					{children}
-					<div className="auth-foot">Powered by <img src="/ravity-logo.svg" alt="Ravity" /></div>
+					<div className="auth-foot">Powered by <img src={`${BASE}/ravity-logo.svg`} alt="Ravity" /></div>
 				</div>
 			</div>
 		</div>

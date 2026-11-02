@@ -5,7 +5,7 @@ import { MdKeyboardArrowDown, MdKeyboardArrowUp, MdMenu, MdMenuOpen, MdNotificat
 import { menu, titleFor } from '../menu';
 import { useAuth } from '../contexts/AuthContext';
 import { useFilters } from '../contexts/FilterContext';
-import { api } from '../api/client';
+import { api, BASE } from '../api/client';
 import { ago } from '../lib/format';
 
 function useLocal(key: string, def: boolean): [boolean, (v: boolean) => void] {
@@ -69,7 +69,7 @@ export default function Layout() {
 			<aside className="aside" aria-label="Main navigation">
 				<div className="aside-head">
 					<NavLink to="/overview" className="brand" aria-label="Gita Mail home">
-						<img className="brand-logo" src="/brand/gitapress-logo.png" alt="Gita Press" />
+						<img className="brand-logo" src={`${BASE}/brand/gitapress-logo.png`} alt="Gita Press" />
 						<div className="brand-text">
 							<div className="brand-name"><span>Gita</span> Mail</div>
 							<div className="brand-sub">Email intelligence</div>
@@ -103,7 +103,7 @@ export default function Layout() {
 				</div>
 				{more.down && <button className="aside-scroll down" onClick={() => scrollNav(1)} aria-label="Scroll menu down"><MdKeyboardArrowDown /></button>}
 				<div className="aside-foot">
-					<img src="/ravity-logo.svg" alt="Ravity" />
+					<img src={`${BASE}/ravity-logo.svg`} alt="Ravity" />
 					<span>{orgName}</span>
 				</div>
 			</aside>
@@ -150,7 +150,7 @@ export default function Layout() {
 				<main className="content">
 					{aiPaused && (
 						<div className="ai-banner" role="alert">
-							<b>Claude analysis is paused</b> until {new Date(sys.data.progress.ai_paused_until).toLocaleTimeString()}: {sys.data.progress.ai_last_error}. New mail is sorted by the rules engine meanwhile. <a href="/admin/processing">Processing status</a>
+							<b>Claude analysis is paused</b> until {new Date(sys.data.progress.ai_paused_until).toLocaleTimeString()}: {sys.data.progress.ai_last_error}. New mail is sorted by the rules engine meanwhile. <a href={`${BASE}/admin/processing`}>Processing status</a>
 						</div>
 					)}
 					<Outlet />

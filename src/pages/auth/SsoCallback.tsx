@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import AuthShell from './AuthShell';
+import { BASE } from '../../api/client';
 
 /** Google (or Microsoft) sign-in lands here with the session in the URL fragment (never sent to servers or logs). */
 export default function SsoCallback() {
@@ -17,7 +18,7 @@ export default function SsoCallback() {
 	}, [loginWithToken, nav]);
 	return (
 		<AuthShell>
-			{err ? <div className="notice error">{err} <a href="/auth/login">Back to sign in</a></div> : <div className="loader"><span className="spin" />Signing you in</div>}
+			{err ? <div className="notice error">{err} <a href={`${BASE}/auth/login`}>Back to sign in</a></div> : <div className="loader"><span className="spin" />Signing you in</div>}
 		</AuthShell>
 	);
 }

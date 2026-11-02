@@ -4,6 +4,9 @@ export class ApiError extends Error {
 	}
 }
 
+/** Sub-folder the app is served from, without the trailing slash: '' at the domain root, '/emailanalytics' under gitapress.in. Set by BASE_PATH at build time. */
+export const BASE = import.meta.env.BASE_URL.replace(/\/$/, '');
+
 let onUnauthorised: (() => void) | null = null;
 export const setUnauthorisedHandler = (fn: () => void) => (onUnauthorised = fn);
 
@@ -17,7 +20,7 @@ export const getToken = () => {
 
 export async function api<T = any>(path: string, opts: { method?: string; body?: unknown; raw?: boolean } = {}): Promise<T> {
 	const token = getToken();
-	const res = await fetch(`/api${path}`, {
+	const res = await fetch(`${BASE}/api${path}`, {
 		method: opts.method || (opts.body ? 'POST' : 'GET'),
 		headers: {
 			...(opts.body ? { 'content-type': 'application/json' } : {}),

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { MdDownload, MdPrint } from 'react-icons/md';
-import { api, getToken, qs } from '../api/client';
+import { api, BASE, getToken, qs } from '../api/client';
 import { useFilters } from '../contexts/FilterContext';
 import FilterBar from '../components/FilterBar';
 import { EmailTabs } from './Conversations';
@@ -24,7 +24,7 @@ export default function CategoryReport() {
 		nav('/conversations?audience=all');
 	};
 	const download = async () => {
-		const res = await fetch(`/api/views/category-report.csv${qs(p)}`, { headers: { authorization: `Bearer ${getToken()}` } });
+		const res = await fetch(`${BASE}/api/views/category-report.csv${qs(p)}`, { headers: { authorization: `Bearer ${getToken()}` } });
 		const a = document.createElement('a');
 		a.href = URL.createObjectURL(await res.blob());
 		a.download = `gitamail-category-report-${new Date().toISOString().slice(0, 10)}.csv`;

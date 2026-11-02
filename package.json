@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite",
     "dev:api": "tsx scripts/dev-server.ts",
+    "start": "node --env-file=.env --import tsx scripts/serve.ts",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
     "build:web": "vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit",

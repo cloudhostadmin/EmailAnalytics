@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { MdForum, MdErrorOutline, MdSentimentDissatisfied, MdPersonSearch, MdTimer, MdChecklist, MdSync, MdDownload, MdContentCopy } from 'react-icons/md';
-import { api, qs, getToken } from '../api/client';
+import { api, BASE, qs, getToken } from '../api/client';
 import { useFilters } from '../contexts/FilterContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
@@ -34,7 +34,7 @@ export default function Overview() {
 	const p = s?.previous;
 
 	const exportCsv = async () => {
-		const res = await fetch(`/api/conversations/export${qs(params)}`, { headers: { authorization: `Bearer ${getToken()}` } });
+		const res = await fetch(`${BASE}/api/conversations/export${qs(params)}`, { headers: { authorization: `Bearer ${getToken()}` } });
 		const blob = await res.blob();
 		const a = document.createElement('a');
 		a.href = URL.createObjectURL(blob);

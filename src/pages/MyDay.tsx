@@ -1,13 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { MdCheckCircle, MdRadioButtonUnchecked, MdEvent, MdMarkEmailUnread, MdWarningAmber, MdRequestQuote, MdForum } from 'react-icons/md';
-import { api, getToken } from '../api/client';
+import { api, BASE, getToken } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import { Card, Empty, Kpi, Loader, PageHead, RagDot, TierBadge } from '../components/ui';
 import { BUSINESS_SHORT, COLORS, STAGE_LABELS, ago, fmtDate, hoursSince } from '../lib/format';
 
 export async function downloadIcs(id: number) {
-	const res = await fetch(`/api/actions/${id}/ics`, { headers: { authorization: `Bearer ${getToken()}` } });
+	const res = await fetch(`${BASE}/api/actions/${id}/ics`, { headers: { authorization: `Bearer ${getToken()}` } });
 	const a = document.createElement('a');
 	a.href = URL.createObjectURL(await res.blob());
 	a.download = `gitamail-action-${id}.ics`;

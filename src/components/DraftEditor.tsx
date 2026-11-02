@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { MdSend, MdSave, MdRefresh, MdClose, MdContentCopy, MdArrowForward, MdInfoOutline, MdAutoAwesome, MdEditNote } from 'react-icons/md';
-import { api } from '../api/client';
+import { api, BASE } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { ago } from '../lib/format';
@@ -162,7 +162,7 @@ export default function DraftEditor({ draft, onDone, compact }: { draft: any; on
 			/>
 			{footerQ.data?.footer && (
 				<div className="draft-footer" title="Added automatically when the reply is sent">
-					<div dangerouslySetInnerHTML={{ __html: footerQ.data.footer.html.replace('cid:gitapress-logo', '/brand/gitapress-logo.png') }} />
+					<div dangerouslySetInnerHTML={{ __html: footerQ.data.footer.html.replace('cid:gitapress-logo', `${BASE}/brand/gitapress-logo.png`) }} />
 					<div className="xs faint mt-8">Added when sent. Address: {footerQ.data.footer.branch.city === 'Gorakhpur' ? 'head office' : `${footerQ.data.footer.branch.city} branch`}, because {footerQ.data.footer.why}. Branch addresses are in Settings → Reply drafts.</div>
 				</div>
 			)}

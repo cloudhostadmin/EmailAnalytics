@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { MdAutoAwesome, MdDownload, MdOpenInNew, MdSearch } from 'react-icons/md';
-import { api, getToken, qs } from '../../api/client';
+import { api, BASE, getToken, qs } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { Card, Empty, Facts, Loader, Modal, PageHead, Story } from '../../components/ui';
@@ -28,7 +28,7 @@ export default function CustomerDb() {
 	const { data, isLoading, isFetching } = useQuery({ queryKey: ['customer-db', f, limit], queryFn: () => api(`/customer-db${qs({ ...f, limit })}`), placeholderData: keepPreviousData });
 	const t = data?.totals || {};
 	const download = async () => {
-		const res = await fetch(`/api/customer-db${qs({ ...f, format: 'csv' })}`, { headers: { authorization: `Bearer ${getToken()}` } });
+		const res = await fetch(`${BASE}/api/customer-db${qs({ ...f, format: 'csv' })}`, { headers: { authorization: `Bearer ${getToken()}` } });
 		const a = document.createElement('a');
 		a.href = URL.createObjectURL(await res.blob());
 		a.download = `gitamail-customers-${new Date().toISOString().slice(0, 10)}.csv`;

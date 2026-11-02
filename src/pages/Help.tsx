@@ -2,7 +2,7 @@ import { Fragment, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { MdDelete, MdDownload, MdEdit, MdRestore, MdSearch, MdUpload } from 'react-icons/md';
-import { api, getToken } from '../api/client';
+import { api, BASE, getToken } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { Card, Loader, Modal, PageHead, Segmented, Switch } from '../components/ui';
@@ -222,7 +222,7 @@ function Reference() {
 	});
 	const tryIt = useMutation({ mutationFn: () => api('/reference/test', { body: { text: test } }) });
 	const sample = async () => {
-		const res = await fetch(`/api/reference/sample/${kind}`, { headers: { authorization: `Bearer ${getToken()}` } });
+		const res = await fetch(`${BASE}/api/reference/sample/${kind}`, { headers: { authorization: `Bearer ${getToken()}` } });
 		const a = document.createElement('a');
 		a.href = URL.createObjectURL(await res.blob());
 		a.download = `gitamail-${kind}-sample.csv`;

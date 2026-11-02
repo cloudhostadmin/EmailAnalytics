@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { MdCheckCircle, MdErrorOutline, MdSave } from 'react-icons/md';
-import { api } from '../../api/client';
+import { api, BASE } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { Card, Loader, PageHead, Switch } from '../../components/ui';
@@ -67,7 +67,7 @@ export default function Settings() {
 							<div className="field"><label>Reference information for replies</label>
 								<textarea className="input" rows={7} disabled={!admin} value={form.replyKnowledge || ''} onChange={(e) => setForm({ ...form, replyKnowledge: e.target.value })}
 									placeholder={'Facts the AI may use instead of leaving a yellow placeholder, for example:\nVPP orders are dispatched within 3 to 5 working days.\nKalyan annual subscription: Rs 300, starts from the January issue.\nBulk orders over 500 copies: write to bulk@… with title, quantity and delivery address.\nRefunds for failed online payments reach the account in 5 to 7 working days.'} />
-								<span className="hint">The AI uses these facts in drafts. Anything not covered here, or not in the email itself, is left as a yellow item for your team to fill in. The default reply for each subgroup and the book catalogue, FAQs and policies are in <a href="/help#templates">Help and templates</a>.</span></div>
+								<span className="hint">The AI uses these facts in drafts. Anything not covered here, or not in the email itself, is left as a yellow item for your team to fill in. The default reply for each subgroup and the book catalogue, FAQs and policies are in <a href={`${BASE}/help#templates`}>Help and templates</a>.</span></div>
 							<div className="grid g-2">
 								<div className="field"><label>Signature</label><textarea className="input" rows={3} disabled={!admin} value={form.replySignature || ''} onChange={(e) => setForm({ ...form, replySignature: e.target.value })} /></div>
 								<div className="field"><label>History read when a mailbox is first connected (days)</label>
