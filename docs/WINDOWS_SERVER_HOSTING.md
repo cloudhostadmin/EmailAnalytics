@@ -4,7 +4,7 @@ This replaces Netlify with the Windows server that already hosts the other Gita 
 
 ```
 Browser ──https──> IIS site "gitapress.in"
-                     └─ /emailanalytics  (IIS application: only a web.config, URL Rewrite + ARR)
+                     └─ /emailanalytics  (IIS application, own app pool, only a web.config: URL Rewrite + ARR)
                            └─ proxy ──> Node.js on 127.0.0.1:8888   (Windows service "EmailAnalytics", npm start)
                                            ├─ app pages  (dist/, built with BASE_PATH=/emailanalytics/)
                                            ├─ REST API   (/api/*)
@@ -18,54 +18,72 @@ Paths and names below are suggestions; if you change one, change it everywhere i
 
 ---
 
-## 0. Install once on the server
+## Shared server: what this setup touches
 
-| Software | Where | Check |
+The server also runs other projects, so everything here is either separate from them or checked first.
+
+| Part | Effect on other projects |
+|---|---|
+| App folder `C:\apps\EmailAnalytics`, its `node_modules`, `.env`, logs | Separate. `npm ci` installs only inside this folder; nothing is installed globally. |
+| Windows service `EmailAnalytics` (NSSM) | Separate service with its own name. |
+| Node app on `127.0.0.1:8888` | Listens on localhost only; no firewall port is opened. The pre-flight check confirms the port is free and not named by another site. |
+| PostgreSQL | If PostgreSQL already runs here, a **new user and database** are added inside it; other databases are not touched. If not, it is installed listening on localhost. |
+| IIS `/emailanalytics` application | Its own folder and its own app pool. Its `web.config` applies only to `/emailanalytics/*`; the gitapress.in website and all other sites keep their own settings. |
+| IIS ARR "Enable proxy" (server-wide) | Only switched on if it is off, and only that one setting. The proxy time-out is **not** changed: "Sync now" runs in the background and the request returns at once. |
+| Node.js | If another project already uses Node 20.6 or newer, it is reused. If its version is older, it is **not upgraded**; a separate portable Node is used for this app only. |
+
+Two safety nets: the read-only pre-flight check before anything is installed (step 0), and an IIS configuration backup before IIS is changed (step 5), with the undo steps at the end of this guide.
+
+---
+
+## 0. Pre-flight check (read only)
+
+Copy `deploy\windows\preflight.ps1` to the server and run it in PowerShell as Administrator:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\preflight.ps1
+```
+
+It changes nothing. It lists the IIS sites and app pools, whether URL Rewrite and ARR are installed and how the proxy is set, the gitapress.in site and its `web.config` rules, Node/Git/NSSM/PM2/PostgreSQL already on the server, which ports from 8888 to 8899 are in use or named by another site, and free RAM and disk. The report is saved on the Desktop as `emailanalytics-preflight.txt`.
+
+Use the report to decide the rest:
+
+* **Port:** if 8888 is in use or appears in another site's `web.config`, pick a free one from the list and use it for `PORT` in `.env` (step 3) and in the IIS `web.config` (step 5).
+* **gitapress.in:** if no IIS site has a gitapress.in binding, this server does not serve gitapress.in, and the `/emailanalytics` path has to be forwarded from wherever it is hosted. Sort that out before going further.
+* **Existing `/emailanalytics`:** if the gitapress.in site already has an `emailanalytics` folder or application, choose another name.
+
+---
+
+## 1. Install only what is missing
+
+| Software | Use the existing one if the pre-flight shows | Otherwise |
 |---|---|---|
-| Node.js LTS (22 or newer) | nodejs.org, Windows Installer (.msi) | `node -v` |
-| Git for Windows | git-scm.com | `git --version` |
-| PostgreSQL 16 or newer | enterprisedb.com Windows installer (includes pgAdmin) | `psql --version` |
-| IIS URL Rewrite 2.1 | iis.net/downloads/microsoft/url-rewrite | "URL Rewrite" icon in IIS Manager |
-| IIS Application Request Routing 3.0 | iis.net/downloads/microsoft/application-request-routing | "Application Request Routing Cache" icon on the server node |
-| NSSM (runs Node as a Windows service) | nssm.cc → unzip `win64\nssm.exe` to `C:\tools\nssm\` and add to PATH | `nssm version` |
+| Node.js | `node version` 20.6 or newer | If Node is **not found**: install the current LTS from nodejs.org (.msi). If it is **older than 20.6**: do not upgrade it (other projects depend on it). Download the Windows **.zip** (x64) of the current LTS from nodejs.org and extract it to `C:\apps\node` (the folder that contains `node.exe`). |
+| Git for Windows | `git: …` | git-scm.com |
+| PostgreSQL | a postgres service | enterprisedb.com Windows installer, 16 or newer. Keep the port it offers (5432, or 5433 if 5432 is taken). |
+| URL Rewrite 2.1 + ARR 3.0 | `installed: RewriteModule` and `installed: ApplicationRequestRouting` | iis.net. Installing them restarts IIS briefly (all sites for a few seconds), so do it at a quiet time. |
+| NSSM | `nssm: …` | nssm.cc → copy `win64\nssm.exe` to `C:\tools\nssm\` |
 
-If other projects on this server are already reverse-proxied through IIS, URL Rewrite and ARR are already installed.
+**Only if you are using the portable Node in `C:\apps\node`:** in every PowerShell window you use for this app, first run
+
+```powershell
+$env:Path = "C:\apps\node;" + $env:Path
+```
+
+This changes PATH for that window only, not for the server or other projects. In step 4 use `C:\apps\node\node.exe` instead of `C:\Program Files\nodejs\node.exe`.
 
 ---
 
-## 1. Move the code to the Gita Press GitHub
+## 2. Database
 
-On GitHub, create `cloudhostadmin/EmailAnalytics` as a **private, empty** repository (no README, no .gitignore, no licence). Then, on any PC with Git:
-
-```powershell
-git clone https://github.com/vikasrungta75/Gita_email.git EmailAnalytics
-cd EmailAnalytics
-git remote rename origin upstream
-git remote add origin https://github.com/cloudhostadmin/EmailAnalytics.git
-git push -u origin main
-```
-
-The full history moves across. `upstream` stays pointed at the original repository so later changes from it can be brought in:
-
-```powershell
-git pull upstream main
-git push origin main
-```
-
-Never commit `.env` (it is already in `.gitignore`).
-
----
-
-## 2. Database (PostgreSQL on the same server)
-
-Open **SQL Shell (psql)** as the `postgres` user and run (choose your own strong password):
+Open **SQL Shell (psql)** (or pgAdmin) as the `postgres` user and run (choose your own strong password):
 
 ```sql
 CREATE USER gitamail WITH PASSWORD 'ChooseAStrongPassword';
 CREATE DATABASE gitamail OWNER gitamail;
 ```
 
-The tables are created automatically the first time the app starts. The app needs the `pgcrypto` extension, which ships with PostgreSQL and which the database owner is allowed to enable.
+This only adds a new user and database; other databases on the same PostgreSQL are untouched (if a `gitamail` user or database already exists, pick another name). The tables are created automatically the first time the app starts. The app needs the `pgcrypto` extension, which ships with PostgreSQL and which the database owner is allowed to enable.
 
 Do **not** open port 5432 in Windows Firewall; the app connects over 127.0.0.1.
 
@@ -76,7 +94,7 @@ Do **not** open port 5432 in Windows Firewall; the app connects over 127.0.0.1.
 ## 3. Put the app on the server
 
 ```powershell
-mkdir C:\apps
+mkdir C:\apps -ErrorAction SilentlyContinue
 cd C:\apps
 git clone https://github.com/cloudhostadmin/EmailAnalytics.git
 cd EmailAnalytics
@@ -97,8 +115,8 @@ DATABASE_URL=postgres://gitamail:ChooseAStrongPassword@127.0.0.1:5432/gitamail
 
 * `APP_URL` has no trailing slash. It is used for Google sign-in, password reset links and links in alert and digest emails.
 * `BASE_PATH` must be set **before** building, because it is written into the app's pages.
-* `PORT`: check nothing else uses it: `netstat -ano | findstr :8888`. If you change it, change it in the IIS `web.config` too.
-* If the database password contains `@ : / # ? %`, write those characters URL-encoded in `DATABASE_URL` (`@` → `%40`, `#` → `%23`, `%` → `%25`).
+* `PORT`: the free port chosen from the pre-flight report.
+* `DATABASE_URL`: use 5433 instead of 5432 if that is the port your PostgreSQL uses. If the password contains `@ : / # ? %`, write those characters URL-encoded (`@` → `%40`, `#` → `%23`, `%` → `%25`).
 * Remove `NETLIFY_DB_URL` if your old `.env` has it.
 * `JWT_SECRET`, `ENCRYPTION_KEY`, `INTERNAL_API_SECRET`: if you are starting fresh, generate each one in PowerShell:
   `$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); -join ($b | % { '{0:x2}' -f $_ })`
@@ -117,7 +135,7 @@ In another window: `curl.exe http://127.0.0.1:8888/api/health` should return JSO
 
 ## 4. Run it as a Windows service (starts with the server, restarts if it crashes)
 
-Run PowerShell **as Administrator**:
+Run PowerShell **as Administrator** (use `C:\apps\node\node.exe` if you are on the portable Node, and the full path to `nssm.exe` if it is not on PATH):
 
 ```powershell
 nssm install EmailAnalytics "C:\Program Files\nodejs\node.exe"
@@ -140,29 +158,30 @@ Run only **one** copy of the app: the background worker is inside the same proce
 
 ## 5. IIS: serve it at gitapress.in/emailanalytics
 
-**5.1 Turn on the ARR proxy and allow long requests** (server-wide; "Sync now" can take up to about 8 minutes). Administrator PowerShell:
+Do this at a quiet time and keep the main website open in a browser to check it afterwards.
+
+**5.1 Back up the IIS configuration** (Administrator PowerShell):
 
 ```powershell
-& "$env:windir\system32\inetsrv\appcmd.exe" set config -section:system.webServer/proxy /enabled:"True" /timeout:"00:10:00" /commit:apphost
+& "$env:windir\system32\inetsrv\appcmd.exe" add backup "before-emailanalytics"
 ```
 
-Or in IIS Manager: click the server name → **Application Request Routing Cache** → **Server Proxy Settings** → tick **Enable proxy**, **Time-out** = 600 → Apply. If other projects already use ARR it is probably enabled; only raise the time-out if it is below 600.
+**5.2 ARR proxy.** If the pre-flight report shows `enabled="true"` in the ARR proxy settings, skip this. Otherwise switch on only that setting:
 
-**5.2 Add the application.** Copy `deploy\iis\web.config` from the repository into a new, otherwise empty folder:
+```powershell
+& "$env:windir\system32\inetsrv\appcmd.exe" set config -section:system.webServer/proxy /enabled:"True" /commit:apphost
+```
+
+Or in IIS Manager: the server name → **Application Request Routing Cache** → **Server Proxy Settings** → tick **Enable proxy** → Apply. Leave every other setting there as it is.
+
+**5.3 Add the application.** Copy `deploy\iis\web.config` from the repository into a new, otherwise empty folder. If you chose a port other than 8888, edit `127.0.0.1:8888` in that copy.
 
 ```powershell
 mkdir C:\inetpub\emailanalytics-proxy
 copy C:\apps\EmailAnalytics\deploy\iis\web.config C:\inetpub\emailanalytics-proxy\
 ```
 
-Then in IIS Manager:
-1. **Application Pools** → Add Application Pool → Name `EmailAnalyticsProxy`, **.NET CLR version: No Managed Code** → OK.
-2. **Sites** → the site that serves `gitapress.in` → right-click → **Add Application…**
-   * Alias: `emailanalytics`
-   * Application pool: `EmailAnalyticsProxy`
-   * Physical path: `C:\inetpub\emailanalytics-proxy`
-
-Or the same in Administrator PowerShell (replace `gitapress.in` with the site's name as shown in IIS Manager):
+Then in Administrator PowerShell (replace `gitapress.in` with the site's name exactly as the pre-flight report shows it):
 
 ```powershell
 Import-Module WebAdministration
@@ -171,9 +190,14 @@ Set-ItemProperty IIS:\AppPools\EmailAnalyticsProxy managedRuntimeVersion ""
 New-WebApplication -Site "gitapress.in" -Name emailanalytics -PhysicalPath C:\inetpub\emailanalytics-proxy -ApplicationPool EmailAnalyticsProxy
 ```
 
-The `web.config` clears the gitapress.in site's own rewrite rules for this folder only, so the main website is not affected and its rules do not interfere. It also redirects http to https.
+Or in IIS Manager: **Application Pools** → Add → Name `EmailAnalyticsProxy`, **.NET CLR version: No Managed Code**; then **Sites** → the gitapress.in site → right-click → **Add Application…** → Alias `emailanalytics`, that pool, physical path `C:\inetpub\emailanalytics-proxy`.
 
-**5.3 Check:** open `https://gitapress.in/emailanalytics/api/health`, then `https://gitapress.in/emailanalytics`.
+The new application has its own app pool, so it never shares a worker process with the gitapress.in website or any other site. Its `web.config` drops the gitapress.in site's rewrite rules for `/emailanalytics` only, so the main site's rules do not interfere and the main site itself is unchanged. It also redirects http to https.
+
+**5.4 Check:**
+1. `https://gitapress.in/emailanalytics/api/health` and `https://gitapress.in/emailanalytics`
+2. The gitapress.in home page and one or two other pages: they should behave exactly as before.
+3. Any other site on the server that uses ARR / reverse proxy.
 
 ---
 
@@ -212,7 +236,23 @@ npm run build:web
 nssm start EmailAnalytics
 ```
 
-(Stop the service first: Windows locks files that the running app is using, and `npm ci` fails with EPERM otherwise.) Database changes are applied automatically on start.
+(Stop the service first: Windows locks files that the running app is using, and `npm ci` fails with EPERM otherwise.) Database changes are applied automatically on start. Updates touch only this app's folder and service.
+
+---
+
+## Undo (remove it without affecting anything else)
+
+```powershell
+Import-Module WebAdministration
+Remove-WebApplication -Site "gitapress.in" -Name emailanalytics
+Remove-WebAppPool -Name EmailAnalyticsProxy
+nssm stop EmailAnalytics
+nssm remove EmailAnalytics confirm
+```
+
+Then delete `C:\inetpub\emailanalytics-proxy` and `C:\apps\EmailAnalytics`, and in psql `DROP DATABASE gitamail; DROP USER gitamail;`. If you switched on the ARR proxy in 5.2 and nothing else uses it, you can switch it off again the same way with `/enabled:"False"`.
+
+Last resort only, if IIS behaves unexpectedly after step 5: `appcmd restore backup "before-emailanalytics"` puts the whole IIS configuration back to the moment of the backup. It also undoes any other IIS change made since then, and IIS restarts its sites, so prefer the targeted commands above.
 
 ---
 
@@ -220,12 +260,12 @@ nssm start EmailAnalytics
 
 | Symptom | Cause and fix |
 |---|---|
-| 502.3 Bad Gateway | The Node service is not running or is on another port. `nssm status EmailAnalytics`, read `logs\service.log`, compare `PORT` in `.env` with the port in `web.config`. |
-| 502.3 after about 2 minutes on "Sync now" | ARR time-out still 120 seconds; step 5.1. |
-| 404 from IIS for `/emailanalytics` | The application was not added under the right site, or URL Rewrite / ARR is not installed. |
+| 502.3 Bad Gateway | The Node service is not running or is on another port. `nssm status EmailAnalytics`, read `logs\service.log`, compare `PORT` in `.env` with the port in the proxy folder's `web.config`. |
+| 404 from IIS for `/emailanalytics` | The application was not added under the right site, or URL Rewrite / ARR is not installed, or the ARR proxy is off (step 5.2). |
 | The page loads but is blank, browser console shows 404 for `/assets/...` | The app was built without `BASE_PATH`. Set `BASE_PATH=/emailanalytics/` in `.env`, run `npm run build:web`, restart the service. |
 | `redirect_uri_mismatch` from Google | Redirect URIs in step 6 must match `APP_URL` exactly. |
 | Links in emails point to the wrong address | `APP_URL` in `.env`; restart the service after changing it. |
-| `/api/health` says database cannot connect | PostgreSQL service not running, or wrong password in `DATABASE_URL` (special characters must be URL-encoded). |
+| `/api/health` says database cannot connect | PostgreSQL service not running, wrong port, or wrong password in `DATABASE_URL` (special characters must be URL-encoded). |
 | Signing in to another gitapress.in app signs you out here (or the reverse) | Both store their login under the browser key `token` on the same domain. Use a subdomain for one of them, or give one app a different key. |
 | `npm ci` fails with EPERM | The service is still running; `nssm stop EmailAnalytics` first. |
+| `node: --import` or `--env-file` is not a recognised option | The service is using a Node older than 20.6. Point NSSM at the newer `node.exe` (step 1). |

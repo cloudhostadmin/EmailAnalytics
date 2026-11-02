@@ -970,6 +970,12 @@ async function kickWorker(mailboxId?: number) {
 		}).catch((e) => console.error('[kick]', e.message));
 		return { queued: true };
 	}
+	// Self-hosted (scripts/serve.ts): run in the background in this process and answer at once,
+	// so the web server in front never has to hold the request open for minutes.
+	if (process.env.SELF_HOSTED === 'true') {
+		runTick({ mailboxId, budgetMs: 8 * 60_000, reports: false }).catch((e) => console.error('[kick]', e.message));
+		return { queued: true };
+	}
 	return { queued: false, result: await runTick({ mailboxId, budgetMs: 8 * 60_000, reports: false }) };
 }
 

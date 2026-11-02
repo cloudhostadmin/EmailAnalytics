@@ -20,6 +20,10 @@ import { fileURLToPath } from 'node:url';
 import { handle } from '../server/api';
 import { runTick } from '../server/worker';
 
+// "Sync now" runs in the background in this process (kickWorker in server/api.ts) and the request returns at
+// once, so IIS/ARR can keep its default proxy time-out and no server-wide setting has to change.
+process.env.SELF_HOSTED = 'true';
+
 const port = Number(process.env.PORT || 8888);
 const host = process.env.HOST || '127.0.0.1';
 const sub = (process.env.BASE_PATH || '').replace(/^\/+|\/+$/g, '');
