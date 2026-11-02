@@ -171,14 +171,28 @@ async function accessToken(mb: MailboxRow) {
 	return data.access_token as string;
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Gmail reports rate limits as 429, or as 403 "Quota exceeded … per minute per user"; both clear within a minute.
+const isQuotaError = (status: number, data: any) =>
+	status === 429 || (status === 403 && /quota|rate ?limit/i.test(`${data?.error?.message || ''} ${JSON.stringify(data?.error?.errors || [])}`));
+
+// Gmail gives each mailbox 6,000 quota units a minute (Cloud projects created after 1 May 2026) and a full
+// message read costs 60, so reads are paced to about 85 messages a minute per mailbox. Set
+// GMAIL_UNITS_PER_MINUTE higher only if Google grants this project a larger per-user quota.
+const FULL_MESSAGE_UNITS = 60;
+const unitsPerMinute = () => Math.max(600, Number(process.env.GMAIL_UNITS_PER_MINUTE) || 6000);
+
 async function gget(url: string, accessTok: string): Promise<any> {
-	for (let attempt = 0; attempt < 4; attempt++) {
+	for (let attempt = 0; attempt < 5; attempt++) {
 		const res = await fetch(url, { headers: { authorization: `Bearer ${accessTok}` } });
-		if (res.status === 429 || res.status >= 500) {
-			await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
+		const data: any = await res.json().catch(() => ({}));
+		const quota = isQuotaError(res.status, data);
+		if (quota || res.status >= 500) {
+			// per-minute quota: wait for the window to move on (15, 30, 45, 60 s); server errors: short backoff
+			if (attempt < 4) await sleep(quota ? 15_000 * (attempt + 1) : 1000 * 2 ** attempt);
 			continue;
 		}
-		const data: any = await res.json().catch(() => ({}));
 		if (!res.ok) {
 			const err: any = new Error(`Gmail ${res.status}: ${data?.error?.message || res.statusText}`);
 			err.status = res.status;
@@ -186,7 +200,7 @@ async function gget(url: string, accessTok: string): Promise<any> {
 		}
 		return data;
 	}
-	throw new Error('Gmail request kept failing (throttled)');
+	throw new Error('Gmail quota or server limit still reached after waiting (throttled); the next round continues');
 }
 
 function parseAddressList(v: string | undefined): Address[] {
@@ -296,15 +310,25 @@ export async function gmailSync(mb: MailboxRow, maxMessages = 200): Promise<Sync
 
 	ids = [...new Set(ids)].slice(0, maxMessages);
 	const messages: NormalizedMessage[] = [];
-	// fetch in small parallel batches
+	// fetch in small parallel batches, paced to the per-mailbox quota. A message deleted meanwhile (404) is
+	// skipped; any other failure fails the round so its messages are fetched again next time, not lost.
+	const batchMs = (10 * FULL_MESSAGE_UNITS * 60_000) / (unitsPerMinute() * 0.85);
 	for (let i = 0; i < ids.length; i += 10) {
+		const started = Date.now();
 		const chunk = await Promise.all(
-			ids.slice(i, i + 10).map((id) => gget(`${API}/messages/${id}?format=full`, tok).catch(() => null)),
+			ids.slice(i, i + 10).map((id) =>
+				gget(`${API}/messages/${id}?format=full`, tok).catch((e) => {
+					if (e?.status === 404) return null;
+					throw e;
+				}),
+			),
 		);
 		for (const m of chunk) {
 			if (!m || (m.labelIds || []).includes('DRAFT')) continue;
 			messages.push(normalizeGmail(m, mb.address));
 		}
+		const wait = batchMs - (Date.now() - started);
+		if (wait > 0) await sleep(wait);
 	}
 	return { messages, state, more };
 }

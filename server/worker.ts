@@ -34,7 +34,8 @@ export async function syncMailbox(mailboxId: number, maxMessages = 300) {
 		return { fetched: batch.messages.length, ...res, conversationsTouched: res.conversationsTouched.size, more: batch.more };
 	} catch (e: any) {
 		console.error('[sync] mailbox', mb.address, e.message);
-		const auth = /invalid_grant|AADSTS|401|403|not connected|consent/i.test(e.message);
+		// a quota/throttling error is temporary: keep the mailbox active, the next round continues
+		const auth = !/quota|rate ?limit|throttl/i.test(e.message) && /invalid_grant|AADSTS|401|403|not connected|consent/i.test(e.message);
 		await q(`update mailboxes set status=$2, last_error=$3 where id=$1`, [mb.id, auth ? 'error' : mb.status, e.message.slice(0, 500)]);
 		await q('update sync_runs set finished_at=now(), error=$2 where id=$1', [run!.id, e.message.slice(0, 500)]);
 		return { error: e.message };
