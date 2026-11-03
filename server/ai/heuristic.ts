@@ -392,8 +392,9 @@ export function heuristicAnalyse(input: ThreadInput): Analysis {
 	const issues = issueCats
 		.filter((c) => c !== 'compliment' && c !== 'enquiry')
 		.map((c) => {
-			const re = CATS.find(([k]) => k === c)![1];
-			const sent = sentences(inboundText).find((s) => re.test(s)) || '';
+			// 'complaint' is added for negative mail without its own keyword rule, so it may have no pattern
+			const re = CATS.find(([k]) => k === c)?.[1];
+			const sent = (re && sentences(inboundText).find((s) => re.test(s))) || '';
 			return { category: c, description: sent ? sent.slice(0, 220) : CATEGORY_LABELS[c], severity: sevFor(c) };
 		})
 		.slice(0, 6);
