@@ -18,6 +18,7 @@ import { googleAuthorizeUrl, googleConfigured, googleExchangeCode, googleSsoEnab
 import { parseEml } from './connectors/upload';
 import { ingestMessages } from './ingest';
 import { analyseConversation, analysePending, backfillHealthHistory, updateCustomerHealth } from './analyze';
+import { queueReanalysis, reanalysePreview } from './reanalyse';
 import { runTick, syncMailbox } from './worker';
 import { aiModel, aiProvider } from './ai/llm';
 import { appUrl, emailLayout, esc, mailerProvider, sendEmail } from './mailer';
@@ -990,6 +991,27 @@ r.post('/api/system/run', async (ctx) => {
 	requireRole(ctx.user, 'manager');
 	await audit(ctx, 'system.run_requested', null, null);
 	return kickWorker();
+});
+
+// Re-analyse emails already in Gita Mail (Settings): all, or those with an email in a period
+r.get('/api/system/reanalyse', async (ctx) => {
+	requireRole(ctx.user, 'admin');
+	return reanalysePreview(ctx.user!.orgId, {
+		from: ctx.query.get('from'),
+		to: ctx.query.get('to'),
+		onlyRulesEngine: ctx.query.get('onlyRulesEngine') === 'true',
+	});
+});
+
+r.post('/api/system/reanalyse', async (ctx) => {
+	requireRole(ctx.user, 'admin');
+	const b = ctx.body || {};
+	const scope = { from: b.from || null, to: b.to || null, onlyRulesEngine: !!b.onlyRulesEngine };
+	const queued = await queueReanalysis(ctx.user!.orgId, scope);
+	await audit(ctx, 'system.reanalyse_requested', 'conversation', null, { ...scope, queued });
+	// start a round now instead of waiting for the next scheduled one; the queue is worked through over the next rounds
+	if (queued) kickWorker().catch((e) => console.error('[reanalyse]', e.message));
+	return { queued };
 });
 
 r.post('/api/connect/:provider/start', async (ctx) => {

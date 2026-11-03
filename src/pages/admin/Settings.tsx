@@ -6,6 +6,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { Card, Loader, PageHead, Switch } from '../../components/ui';
 import { COLORS, ago } from '../../lib/format';
+import ReanalyseCard from './ReanalyseCard';
 
 const Status = ({ ok, label, detail }: { ok: boolean; label: string; detail?: string }) => (
 	<div className="row-between mb-8">
@@ -144,6 +145,7 @@ export default function Settings() {
 							</div>
 						)}
 					</Card>
+					{admin && <ReanalyseCard provider={d?.ai?.provider} />}
 					<Card title="Security model" accent={COLORS.general}>
 						<ul className="small muted" style={{ margin: 0, paddingLeft: 18, lineHeight: 1.8 }}>
 							<li>Gmail read-only access for analysis; replies are sent only when a person presses Send</li>
