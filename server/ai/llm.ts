@@ -89,6 +89,8 @@ async function anthropicCall(body: any) {
 				'x-api-key': process.env.ANTHROPIC_API_KEY!,
 				'anthropic-version': '2023-06-01',
 				'content-type': 'application/json',
+				// keys that are not scoped to a workspace must name the workspace on every request
+				...(process.env.ANTHROPIC_WORKSPACE_ID?.trim() ? { 'anthropic-workspace-id': process.env.ANTHROPIC_WORKSPACE_ID.trim() } : {}),
 			},
 			body: JSON.stringify(body),
 			signal: AbortSignal.timeout(120_000),
@@ -106,6 +108,8 @@ async function anthropicCall(body: any) {
 			if (res.status === 401 || res.status === 403) throw new QuotaError(`Claude rejected the API key (${res.status}: ${msg}). Check ANTHROPIC_API_KEY in the app's settings (.env on the server), then restart the app.`, 900);
 			// out of credit or spend limit reached: pause instead of failing every thread
 			if (res.status === 400 && /credit balance|spend limit|billing/i.test(msg)) throw new QuotaError(`Claude: ${msg}`, 3600);
+			// a key without a workspace fails every call the same way: pause and say what to set
+			if (res.status === 400 && /workspace/i.test(msg)) throw new QuotaError(`Claude: ${msg} Set ANTHROPIC_WORKSPACE_ID in the app's settings (.env on the server), or use an API key created inside a workspace, then restart the app.`, 900);
 			throw new Error(`Claude ${res.status}: ${msg}`);
 		}
 		return data;
