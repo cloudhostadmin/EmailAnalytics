@@ -80,8 +80,24 @@ async function logUsage(orgId: number | null, model: string, inTok: number, outT
 	]).catch(() => {});
 }
 
+// Newer Claude models (the 5.5 generation) reject forced tool use (tool_choice "tool" or "any") with a 400.
+// Such a request is switched to tool_choice "auto" with the tool asked for in the prompt, and that is
+// remembered for the rest of the process, so only the first call ever hits the error.
+let forcedToolUnsupported = false;
+function useAutoToolChoice(body: any): boolean {
+	const tc = body.tool_choice;
+	if (!tc || (tc.type !== 'tool' && tc.type !== 'any')) return false;
+	body.tool_choice = { type: 'auto' };
+	const last = body.messages?.[body.messages.length - 1];
+	const tool = tc.type === 'tool' ? `the ${tc.name} tool` : 'the provided tool';
+	if (last && typeof last.content === 'string') last.content += `\n\nAnswer only by calling ${tool} exactly once, with no other text.`;
+	return true;
+}
+const textOf = (data: any) => (data?.content || []).filter((c: any) => c.type === 'text').map((c: any) => c.text).join('');
+
 async function anthropicCall(body: any) {
 	await pace();
+	if (forcedToolUnsupported) useAutoToolChoice(body);
 	for (let i = 0; i < 4; i++) {
 		const res = await fetch(`${(process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com').replace(/\/$/, '')}/v1/messages`, {
 			method: 'POST',
@@ -104,6 +120,10 @@ async function anthropicCall(body: any) {
 		}
 		if (!res.ok) {
 			const msg = data?.error?.message || 'error';
+			if (res.status === 400 && /tool_choice/i.test(msg) && /not supported/i.test(msg) && useAutoToolChoice(body)) {
+				forcedToolUnsupported = true;
+				continue;
+			}
 			// a wrong or revoked key fails every call: pause and say so, instead of failing thousands of threads one by one
 			if (res.status === 401 || res.status === 403) throw new QuotaError(`Claude rejected the API key (${res.status}: ${msg}). Check ANTHROPIC_API_KEY in the app's settings (.env on the server), then restart the app.`, 900);
 			// out of credit or spend limit reached: pause instead of failing every thread
@@ -339,8 +359,10 @@ export async function analyseThread(input: ThreadInput, orgId: number): Promise<
 			});
 			await logUsage(orgId, model, data.usage?.input_tokens, data.usage?.output_tokens, 'analysis');
 			const tool = (data.content || []).find((c: any) => c.type === 'tool_use');
-			if (!tool) throw new Error('No tool_use in response');
-			return { analysis: coerce(tool.input, fallback), model };
+			// with tool_choice "auto" the model may, rarely, answer with the JSON as text instead
+			const parsed = tool?.input ?? (textOf(data).trim() ? parseJsonLoose(textOf(data)) : null);
+			if (!parsed) throw new Error(`No tool_use in response${data.stop_reason ? ` (stop_reason: ${data.stop_reason})` : ''}`);
+			return { analysis: coerce(parsed, fallback), model };
 		}
 		const data = await openaiCall({
 			model,
@@ -374,9 +396,12 @@ export async function extractJson(orgId: number, system: string, prompt: string,
 		return parseJsonLoose(r.text);
 	}
 	if (provider === 'anthropic') {
-		const data = await anthropicCall({ model, max_tokens: 1500, system, tools: [{ name, description: 'Record the extracted fields.', input_schema: schema }], tool_choice: { type: 'tool', name }, messages: [{ role: 'user', content: prompt }] });
+		// max_tokens leaves room for the thinking that newer models always do before answering
+		const data = await anthropicCall({ model, max_tokens: 4000, system, tools: [{ name, description: 'Record the extracted fields.', input_schema: schema }], tool_choice: { type: 'tool', name }, messages: [{ role: 'user', content: prompt }] });
 		await logUsage(orgId, model, data.usage?.input_tokens, data.usage?.output_tokens, name);
-		return (data.content || []).find((c: any) => c.type === 'tool_use')?.input || null;
+		const tool = (data.content || []).find((c: any) => c.type === 'tool_use');
+		if (tool) return tool.input || null;
+		try { return textOf(data).trim() ? parseJsonLoose(textOf(data)) : null; } catch { return null; }
 	}
 	const data = await openaiCall({ model, temperature: 0, messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }], tools: [{ type: 'function', function: { name, description: 'Record the extracted fields.', parameters: schema } }], tool_choice: { type: 'function', function: { name } } });
 	await logUsage(orgId, model, data.usage?.prompt_tokens, data.usage?.completion_tokens, name);
@@ -395,7 +420,7 @@ export async function askLLM(orgId: number, system: string, prompt: string): Pro
 		return r.text;
 	}
 	if (provider === 'anthropic') {
-		const data = await anthropicCall({ model, max_tokens: 1500, system, messages: [{ role: 'user', content: prompt }] });
+		const data = await anthropicCall({ model, max_tokens: 4000, system, messages: [{ role: 'user', content: prompt }] });
 		await logUsage(orgId, model, data.usage?.input_tokens, data.usage?.output_tokens, 'copilot');
 		return (data.content || []).filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n');
 	}
