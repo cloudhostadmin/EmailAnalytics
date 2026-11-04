@@ -351,6 +351,16 @@ export interface OutgoingReply {
 	references?: string[];
 	/** images referenced from the HTML as cid:… */
 	inline?: { cid: string; contentType: string; base64: string; filename: string }[];
+	/** files sent with the reply */
+	attachments?: { filename: string; contentType: string; base64: string }[];
+}
+
+// a filename that survives every mail client: plain ASCII in filename="…", the real (Hindi or other) name in filename*=
+function fileParams(filename: string) {
+	const ascii = filename.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_') || 'attachment';
+	if (ascii === filename) return { type: `name="${ascii}"`, disposition: `filename="${ascii}"` };
+	const star = `UTF-8''${encodeURIComponent(filename).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)}`;
+	return { type: `name="${ascii}"; name*=${star}`, disposition: `filename="${ascii}"; filename*=${star}` };
 }
 
 export function buildMime(m: OutgoingReply): string {
@@ -370,14 +380,29 @@ export function buildMime(m: OutgoingReply): string {
 		`--${boundary}`, 'Content-Type: text/html; charset="UTF-8"', 'Content-Transfer-Encoding: base64', '', wrap76(Buffer.from(m.html).toString('base64')),
 		`--${boundary}--`,
 	];
-	if (!m.inline?.length) return [...headers, `Content-Type: multipart/alternative; boundary="${boundary}"`, '', ...alt, ''].join('\r\n');
-	// text and HTML, plus the images the HTML shows inline (the logo)
-	const rel = `rel_${boundary}`;
+	// the message body: text and HTML, plus the images the HTML shows inline (the logo)
+	let body: string[];
+	if (!m.inline?.length) body = [`Content-Type: multipart/alternative; boundary="${boundary}"`, '', ...alt];
+	else {
+		const rel = `rel_${boundary}`;
+		body = [
+			`Content-Type: multipart/related; boundary="${rel}"`, '',
+			`--${rel}`, `Content-Type: multipart/alternative; boundary="${boundary}"`, '', ...alt,
+			...m.inline.flatMap((f) => [`--${rel}`, `Content-Type: ${f.contentType}; name="${f.filename}"`, 'Content-Transfer-Encoding: base64', `Content-ID: <${f.cid}>`, `Content-Disposition: inline; filename="${f.filename}"`, '', wrap76(f.base64)]),
+			`--${rel}--`,
+		];
+	}
+	if (!m.attachments?.length) return [...headers, ...body, ''].join('\r\n');
+	// files: the body and each file as parts of a multipart/mixed message
+	const mix = `mix_${boundary}`;
 	return [
-		...headers, `Content-Type: multipart/related; boundary="${rel}"`, '',
-		`--${rel}`, `Content-Type: multipart/alternative; boundary="${boundary}"`, '', ...alt,
-		...m.inline.flatMap((f) => [`--${rel}`, `Content-Type: ${f.contentType}; name="${f.filename}"`, 'Content-Transfer-Encoding: base64', `Content-ID: <${f.cid}>`, `Content-Disposition: inline; filename="${f.filename}"`, '', wrap76(f.base64)]),
-		`--${rel}--`, '',
+		...headers, `Content-Type: multipart/mixed; boundary="${mix}"`, '',
+		`--${mix}`, ...body,
+		...m.attachments.flatMap((f) => {
+			const fp = fileParams(f.filename);
+			return [`--${mix}`, `Content-Type: ${f.contentType || 'application/octet-stream'}; ${fp.type}`, 'Content-Transfer-Encoding: base64', `Content-Disposition: attachment; ${fp.disposition}`, '', wrap76(f.base64)];
+		}),
+		`--${mix}--`, '',
 	].join('\r\n');
 }
 
@@ -385,11 +410,27 @@ export function buildMime(m: OutgoingReply): string {
 export async function gmailSendReply(mb: MailboxRow, m: OutgoingReply): Promise<{ id: string; threadId: string }> {
 	if (!gmailSendEnabled()) throw new Error('Sending is switched off (GMAIL_SEND_ENABLED=false)');
 	const tok = mb.provider === 'gmail_app' ? await delegatedToken(mb.address, GMAIL_SEND) : await accessToken(mb);
-	const res = await fetch(`${API}/messages/send`, {
-		method: 'POST',
-		headers: { authorization: `Bearer ${tok}`, 'content-type': 'application/json' },
-		body: JSON.stringify({ raw: b64url(buildMime(m)), ...(m.threadId ? { threadId: m.threadId } : {}) }),
-	});
+	const mime = buildMime(m);
+	// small messages go as JSON; a large one (big attachments) through Gmail's upload endpoint, which takes up to 35 MB
+	const res =
+		mime.length < 3_500_000
+			? await fetch(`${API}/messages/send`, {
+					method: 'POST',
+					headers: { authorization: `Bearer ${tok}`, 'content-type': 'application/json' },
+					body: JSON.stringify({ raw: b64url(mime), ...(m.threadId ? { threadId: m.threadId } : {}) }),
+				})
+			: await (() => {
+					const b = `up_${Date.now().toString(36)}`;
+					const payload = [
+						`--${b}`, 'Content-Type: application/json; charset=UTF-8', '', JSON.stringify(m.threadId ? { threadId: m.threadId } : {}),
+						`--${b}`, 'Content-Type: message/rfc822', '', mime, `--${b}--`, '',
+					].join('\r\n');
+					return fetch(`https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send?uploadType=multipart`, {
+						method: 'POST',
+						headers: { authorization: `Bearer ${tok}`, 'content-type': `multipart/related; boundary=${b}` },
+						body: payload,
+					});
+				})();
 	const data: any = await res.json().catch(() => ({}));
 	if (!res.ok) {
 		const msg = data?.error?.message || res.statusText;

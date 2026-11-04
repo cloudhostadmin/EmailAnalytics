@@ -7,6 +7,7 @@ import { useToast } from '../../contexts/ToastContext';
 import { Card, Loader, PageHead, Switch } from '../../components/ui';
 import { COLORS, ago } from '../../lib/format';
 import ReanalyseCard from './ReanalyseCard';
+import SavedFilesCard from './SavedFilesCard';
 
 const Status = ({ ok, label, detail }: { ok: boolean; label: string; detail?: string }) => (
 	<div className="row-between mb-8">
@@ -103,6 +104,7 @@ export default function Settings() {
 							)}
 						</div>
 					</Card>
+					{admin && <SavedFilesCard />}
 					<Card title="Data protection" accent={COLORS.purple}>
 						<div className="col gap-16">
 							<Switch checked={form.piiRedaction} onChange={(v) => admin && setForm({ ...form, piiRedaction: v })} label="Redact card, bank, ID and password details before AI analysis" />

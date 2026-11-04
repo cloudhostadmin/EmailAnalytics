@@ -174,7 +174,7 @@ export default function Mailboxes() {
 												{m.status === 'paused'
 													? <button className="btn ghost sm" title="Resume" onClick={() => patch.mutate({ id: m.id, body: { status: 'active' } })}><MdPlayArrow /></button>
 													: <button className="btn ghost sm" title="Pause" onClick={() => patch.mutate({ id: m.id, body: { status: 'paused' } })}><MdPause /></button>}
-												{['microsoft', 'microsoft_app', 'gmail'].includes(m.provider) && <button className="btn ghost sm" title="Re-sync from scratch" onClick={() => confirm('Restart sync from the backfill window? Existing emails are kept and duplicates are skipped.') && patch.mutate({ id: m.id, body: { resetSync: true } })}><MdRestartAlt /></button>}
+												{['microsoft', 'microsoft_app', 'gmail'].includes(m.provider) && <button className="btn ghost sm" title="Re-sync from scratch" onClick={() => confirm('Read this mailbox again from the backfill window? Existing emails are kept and duplicates are skipped. Emails a colleague forwarded into it are read again as the reader\'s own email.') && patch.mutate({ id: m.id, body: { resetSync: true } })}><MdRestartAlt /></button>}
 												<button className="btn ghost sm" title="Remove" onClick={() => {
 													if (!confirm(`Stop monitoring ${m.address}?`)) return;
 													remove.mutate({ id: m.id, purge: confirm('Also delete the emails and conversations that only came from this mailbox?') });

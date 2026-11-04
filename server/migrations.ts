@@ -525,4 +525,28 @@ create index if not exists customers_profile_at_idx on customers (org_id, profil
 alter table customers add column if not exists enrichment jsonb not null default '{}';
 alter table customers add column if not exists enriched_at timestamptz;
 ` },
+{ id: '011_forwards_attachments', sql: String.raw`
+-- a reader's email forwarded in by a staff member is stored as the reader's email; who forwarded it and their note are kept
+alter table emails add column if not exists forwarded_by text;
+alter table emails add column if not exists forward_note text;
+-- files sent with replies, and a library of saved files (bank details, catalogue, order form) to attach with one click
+create table if not exists attachments (
+  id            bigserial primary key,
+  org_id        bigint not null references organisations(id) on delete cascade,
+  saved         boolean not null default false,
+  name          text not null default '',
+  filename      text not null,
+  content_type  text not null default 'application/octet-stream',
+  size          int not null,
+  data          bytea not null,
+  created_by    bigint references users(id) on delete set null,
+  created_at    timestamptz not null default now()
+);
+create index if not exists attachments_saved_idx on attachments (org_id) where saved;
+alter table reply_drafts add column if not exists attachment_ids bigint[] not null default '{}';
+-- the reader's email is quoted under the reply unless switched off for that reply
+alter table reply_drafts add column if not exists quote_original boolean not null default true;
+-- a sender chosen by a person is kept when the draft is rewritten after a new analysis
+alter table reply_drafts add column if not exists sender_chosen boolean not null default false;
+` },
 ];

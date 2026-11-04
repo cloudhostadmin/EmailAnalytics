@@ -6,12 +6,14 @@ import { one, q } from './db';
 import type { NormalizedMessage, MailboxRow } from './connectors/types';
 import type { Org } from './settings';
 import {
+	AUTOMATED_SENDER,
 	FREE_MAIL_DOMAINS,
 	cleanBody,
 	contentHash,
 	dedupKey,
 	domainOf,
 	normalizeSubject,
+	parseForward,
 	snippet,
 	titleCaseFromDomain,
 } from './text';
@@ -56,11 +58,42 @@ function isInternal(org: Org, mb: MailboxRow, address: string): boolean {
 	return !!own && !FREE_MAIL_DOMAINS.has(own) && d === own;
 }
 
+/**
+ * A staff member forwarded a reader's email into this mailbox: read it as the reader's own email (sender,
+ * date, subject and text from the forwarded header), and keep who forwarded it and their note.
+ */
+export function asForwardedOriginal(org: Org, mb: MailboxRow, m: NormalizedMessage): { m: NormalizedMessage; forwardedBy: string; note: string } | null {
+	if (m.isAutomated || !isInternal(org, mb, m.from.address)) return null;
+	const f = parseForward(m.bodyText, m.subject, (a) => isInternal(org, mb, a));
+	if (!f || !f.body) return null;
+	// the original's date, unless the header's date is missing or implausible
+	const plausible = f.sentAt && f.sentAt.getTime() <= m.sentAt.getTime() + 10 * 60_000 && f.sentAt.getTime() > m.sentAt.getTime() - 180 * 86_400_000;
+	return {
+		forwardedBy: m.from.address.toLowerCase(),
+		note: f.note.slice(0, 4000),
+		m: {
+			...m,
+			from: { address: f.from.address, name: f.from.name },
+			to: (f.to.length ? f.to : [mb.address]).map((address) => ({ address, name: '' })),
+			cc: [],
+			subject: f.subject || m.subject,
+			bodyText: f.body,
+			sentAt: plausible ? f.sentAt! : m.sentAt,
+			// the forward's own references point at the staff thread, not the reader's
+			inReplyTo: null,
+			references: [],
+			isAutomated: AUTOMATED_SENDER.test(f.from.address),
+		},
+	};
+}
+
 async function ingestOne(
 	org: Org,
 	mb: MailboxRow,
-	m: NormalizedMessage,
+	incoming: NormalizedMessage,
 ): Promise<'skipped' | 'exists' | { duplicate: boolean; conversationId: number | null }> {
+	const fwd = asForwardedOriginal(org, mb, incoming);
+	const m = fwd ? fwd.m : incoming;
 	if (!m.from.address) return 'skipped';
 	if (m.isAutomated && org.settings.ignoreAutomated) return 'skipped';
 	// a "reply" from a known human to an automated thread is not automated
@@ -106,6 +139,7 @@ async function ingestOne(
 	// newsletters and system mail are categorised, but never become customer records
 	const customerId = counterpart && !automated ? await resolveCustomer(org.id, counterpart.address, counterpart.name) : null;
 	const staff = [m.from, ...m.to, ...m.cc].map((r) => r.address).filter((a) => a && isInternal(org, mb, a));
+	if (fwd) staff.push(fwd.forwardedBy);
 
 	// ── Conversation resolution ───────────────────────────────────────────
 	const threadKey = m.threadId ? `t:${mb.provider}:${mb.id}:${m.threadId}` : null;
@@ -168,8 +202,9 @@ async function ingestOne(
 	await q(
 		`insert into emails (org_id, mailbox_id, conversation_id, provider_message_id, internet_message_id, provider_thread_id,
 			in_reply_to, dedup_key, content_hash, is_duplicate, duplicate_of, direction, from_address, from_name, to_addresses,
-			cc_addresses, subject, body_text, body_clean, snippet, has_attachments, importance, web_link, sent_at, is_automated)
-		 values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+			cc_addresses, subject, body_text, body_clean, snippet, has_attachments, importance, web_link, sent_at, is_automated,
+			forwarded_by, forward_note)
+		 values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
 		 on conflict (mailbox_id, provider_message_id) do nothing`,
 		[
 			org.id, mb.id, conversationId, m.providerMessageId, m.internetMessageId, m.threadId, m.inReplyTo, dk, ch,
@@ -177,6 +212,7 @@ async function ingestOne(
 			m.to.map((r) => r.address), m.cc.map((r) => r.address), m.subject.slice(0, 1000),
 			m.bodyText.slice(0, 100_000), clean.slice(0, 20_000), snippet(clean || m.bodyText), m.hasAttachments,
 			m.importance, m.webLink, m.sentAt, automated,
+			fwd?.forwardedBy ?? null, fwd?.note || null,
 		],
 	);
 	if (staff.length) {
@@ -258,4 +294,29 @@ async function resolveCustomer(orgId: number, address: string, name: string): Pr
 		[orgId, customerId, address.toLowerCase(), name || ''],
 	);
 	return customerId;
+}
+
+/**
+ * Before a mailbox is read again from scratch: forget the staff forwards that were stored as internal mail
+ * (before forwarded emails were recognised), so the re-read stores each as the reader's own email.
+ */
+export async function forgetForwardsForReread(org: Org, mb: MailboxRow): Promise<number> {
+	const rows = await q<any>(
+		`select id, conversation_id, provider_thread_id, from_address, from_name, subject, body_text, sent_at
+		   from emails where mailbox_id=$1 and direction='internal' and not is_automated and forwarded_by is null`,
+		[mb.id],
+	);
+	const convs = new Set<number>();
+	let n = 0;
+	for (const r of rows) {
+		const msg = { from: { address: r.from_address, name: r.from_name || '' }, to: [], cc: [], subject: r.subject || '', bodyText: r.body_text || '', sentAt: new Date(r.sent_at), isAutomated: false } as unknown as NormalizedMessage;
+		if (!asForwardedOriginal(org, mb, msg)) continue;
+		await q('delete from emails where id=$1', [r.id]);
+		// the staff thread must not pull the re-read email back into the old internal conversation
+		if (r.provider_thread_id) await q('delete from conversation_keys where key=$1', [`t:${mb.provider}:${mb.id}:${r.provider_thread_id}`]);
+		if (r.conversation_id) convs.add(Number(r.conversation_id));
+		n++;
+	}
+	for (const c of convs) await refreshConversation(c, false);
+	return n;
 }

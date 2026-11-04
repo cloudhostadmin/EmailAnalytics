@@ -143,3 +143,118 @@ export function titleCaseFromDomain(domain: string): string {
 		.map((w) => w.charAt(0).toUpperCase() + w.slice(1))
 		.join(' ');
 }
+
+// ── Forwarded emails ─────────────────────────────────────────────────────────
+// A staff member forwards a reader's email to another mailbox (for example from their own inbox to
+// booksales@). The forwarded copy is read as the reader's own email: sender, date, subject and text
+// come from the forwarded header block; the forwarder's note above it is kept separately.
+
+const FWD_SUBJECT = /^\s*(fwd?|fw|tr|wg|rv|enc|doorst|vs|अग्रेषित)\s*(\[\d+\])?\s*:/i;
+const FWD_SEPARATOR = /^\s*(-{3,}.*-{3,}|_{8,}|begin forwarded message:?|अग्रेषित संदेश.*)\s*$/i;
+const LBL_FROM = /^(from|प्रेषक|भेजने वाला|से|von|de|van|da)$/i;
+const LBL_DATE = /^(date|sent|दिनांक|तारीख|तिथि|भेजा गया|datum|gesendet|envoyé|enviado|fecha|data)$/i;
+const LBL_SUBJECT = /^(subject|विषय|betreff|objet|asunto|oggetto|onderwerp)$/i;
+const LBL_TO = /^(to|प्रति|को|an|à|a|para|aan)$/i;
+const LBL_CC = /^(cc|प्रतिलिपि|kopie)$/i;
+const HEADER_LINE = /^\s*\*?\s*([\p{L}\p{M} ]{1,24}?)\s*\*?\s*:\s*\*?\s*(.*?)\s*$/u;
+const EMAIL_IN = /([A-Z0-9._%+'-]+@[A-Z0-9-]+(?:\.[A-Z0-9-]+)*\.[A-Z]{2,})/i;
+
+function parseAddressText(v: string): { address: string; name: string } | null {
+	const m = EMAIL_IN.exec(v);
+	if (!m) return null;
+	const address = m[1].toLowerCase();
+	const name = v
+		.slice(0, m.index)
+		.replace(/[<[(]\s*(mailto:)?\s*$/i, '')
+		.replace(/^["'\s*]+|["'\s*]+$/g, '')
+		.trim();
+	return { address, name: name.includes('@') ? '' : name };
+}
+
+/** A forwarded header's date: "Mon, 3 Nov 2026 at 10:15", "Monday, November 3, 2026 10:15 AM", … */
+export function parseLooseDate(v: string): Date | null {
+	const s = v
+		.replace(/\b(mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?,?\s*/i, '')
+		.replace(/\s+at\s+/i, ' ')
+		.replace(/\s*\(.*\)\s*$/, '')
+		.trim();
+	const t = Date.parse(s);
+	return Number.isNaN(t) ? null : new Date(t);
+}
+
+interface FwdBlock { from: { address: string; name: string }; date: Date | null; subject: string; to: string[]; start: number; end: number }
+
+/** the header block that starts at line i ("From:" with an address, then Date/Subject/To lines), if any */
+function headerAt(lines: string[], i: number): FwdBlock | null {
+	const first = HEADER_LINE.exec(lines[i] || '');
+	if (!first || !LBL_FROM.test(first[1].trim())) return null;
+	const from = parseAddressText(first[2]);
+	if (!from) return null;
+	const blk: FwdBlock = { from, date: null, subject: '', to: [], start: i, end: i + 1 };
+	let fields = 1;
+	for (let j = i + 1; j < Math.min(lines.length, i + 10); j++) {
+		const h = HEADER_LINE.exec(lines[j]);
+		if (!h) {
+			if (!lines[j].trim()) break;
+			if (blk.to.length && EMAIL_IN.test(lines[j])) { blk.end = j + 1; continue; } // a To/Cc list wrapped onto the next line
+			break;
+		}
+		const label = h[1].trim();
+		if (LBL_DATE.test(label)) blk.date = parseLooseDate(h[2]);
+		else if (LBL_SUBJECT.test(label)) blk.subject = h[2];
+		else if (LBL_TO.test(label) || LBL_CC.test(label)) blk.to.push(...(h[2].match(new RegExp(EMAIL_IN.source, 'gi')) || []).map((a) => a.toLowerCase()));
+		else break;
+		fields++;
+		blk.end = j + 1;
+	}
+	// a real forwarded header has at least a date or a subject next to the sender
+	return fields >= 2 && (blk.date || blk.subject) ? blk : null;
+}
+
+export interface ForwardedOriginal {
+	from: { address: string; name: string };
+	sentAt: Date | null;
+	subject: string;
+	to: string[];
+	/** the original email's text, without the forward headers */
+	body: string;
+	/** what the forwarder wrote above the forwarded email */
+	note: string;
+}
+
+/**
+ * The original email inside a forwarded one. `isInternal` decides which senders are staff: forwards
+ * between staff are looked through, so a chain (reader → A → B → booksales@) yields the reader's email.
+ */
+export function parseForward(bodyText: string, subject: string, isInternal: (address: string) => boolean): ForwardedOriginal | null {
+	const lines = (bodyText || '').replace(/\r\n/g, '\n').split('\n');
+	const looksForwarded = FWD_SUBJECT.test(subject || '') || lines.some((l) => FWD_SEPARATOR.test(l) && /forward|अग्रेषित|weitergeleitet|transféré|reenviado|-{3,}/i.test(l));
+	if (!looksForwarded) return null;
+	let noteEnd = -1;
+	for (let i = 0; i < lines.length; i++) {
+		// inner blocks need a separator or a quote marker just above them, so a "From:" line in a normal email is not taken for one
+		const prev = lines.slice(Math.max(0, i - 3), i).join('\n');
+		const marked = FWD_SEPARATOR.test(prev.split('\n').filter((l) => l.trim()).pop() || '') || noteEnd < 0;
+		if (!marked) continue;
+		const blk = headerAt(lines, i);
+		if (!blk) continue;
+		if (noteEnd < 0) noteEnd = i;
+		if (isInternal(blk.from.address)) continue; // a forward between staff: look further down
+		let bodyLines = lines.slice(blk.end);
+		while (bodyLines.length && !bodyLines[0].trim()) bodyLines.shift();
+		const note = lines
+			.slice(0, noteEnd)
+			.filter((l) => !FWD_SEPARATOR.test(l))
+			.join('\n')
+			.trim();
+		return {
+			from: blk.from,
+			sentAt: blk.date,
+			subject: (blk.subject || subject || '').replace(FWD_SUBJECT, '').trim(),
+			to: [...new Set(blk.to)],
+			body: bodyLines.join('\n').trim(),
+			note,
+		};
+	}
+	return null;
+}

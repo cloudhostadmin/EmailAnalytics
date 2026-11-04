@@ -16,7 +16,7 @@ import {
 } from './connectors/microsoft';
 import { googleAuthorizeUrl, googleConfigured, googleExchangeCode, googleSsoEnabled, googleSigninConnectsMailbox, googleSigninScopes, googleSignIn, googleTestMailbox, serviceAccount, workspaceConfigured, GMAIL_READONLY, GMAIL_SEND, gmailSendEnabled, loadServiceAccount, parseServiceAccount } from './connectors/gmail';
 import { parseEml } from './connectors/upload';
-import { ingestMessages } from './ingest';
+import { forgetForwardsForReread, ingestMessages } from './ingest';
 import { analyseConversation, analysePending, backfillHealthHistory, updateCustomerHealth } from './analyze';
 import { queueReanalysis, reanalysePreview } from './reanalyse';
 import { runTick, syncMailbox } from './worker';
@@ -31,7 +31,8 @@ import { buildProfile, listCustomerDb, merged as mergedProfile, updateProfile } 
 import { listTemplates, resetTemplate, updateTemplate } from './templates';
 import { deleteReference, importCsv, listReference, matchReference, TEMPLATES_CSV, type RefKind } from './reference';
 import { normaliseSubcategory, subgroupOf, taxonomyTree } from './ai/taxonomy';
-import { dismissDraft, fillDraft, getDraft, getDraftForConversation, listDrafts, saveDraft, sendDraft } from './drafts';
+import { dismissDraft, fillDraft, getDraft, getDraftForConversation, listDrafts, quotePreview, saveDraft, sendDraft, senderOptions } from './drafts';
+import { addDraftAttachment, addSaved, attachmentFile, attachSaved, listSaved, removeDraftAttachment, removeSaved } from './attachments';
 import { BUSINESS_CATEGORIES, BUSINESS_LABELS, CATEGORIES, CATEGORY_LABELS, PROPOSAL_STAGES, type BusinessCategory } from './ai/types';
 import type { MailboxRow } from './connectors/types';
 
@@ -308,7 +309,7 @@ r.get('/api/conversations/:id', async (ctx) => {
 	const emails = await q<any>(
 		`select e.id, e.mailbox_id, m.address as mailbox_address, e.direction, e.from_address, e.from_name, e.to_addresses, e.cc_addresses,
 		        e.subject, e.body_clean, e.body_text, e.sent_at, e.sentiment, e.sentiment_score, e.is_duplicate, e.duplicate_of,
-		        e.has_attachments, e.web_link
+		        e.has_attachments, e.web_link, e.forwarded_by, e.forward_note
 		   from emails e join mailboxes m on m.id=e.mailbox_id where e.conversation_id=$1 order by e.sent_at, e.id`,
 		[id],
 	);
@@ -454,6 +455,67 @@ r.get('/api/drafts/:id/footer', async (ctx) => {
 	const d = await draftAccess(ctx);
 	return { footer: await footerForConversation(ctx.user!.orgId, d.conversation_id) };
 });
+// the mailboxes this reply can go from, and the reader's email that is quoted under it
+r.get('/api/drafts/:id/senders', async (ctx) => {
+	const d = await draftAccess(ctx);
+	return senderOptions(ctx.user!, d.id);
+});
+r.get('/api/drafts/:id/quote', async (ctx) => {
+	const d = await draftAccess(ctx);
+	return quotePreview(ctx.user!, d.id);
+});
+
+// files on a reply: upload one, add one from the saved library, or take one off
+r.post('/api/drafts/:id/attachments', async (ctx) => {
+	requireRole(ctx.user, 'analyst');
+	const d = await draftAccess(ctx);
+	const b = ctx.body || {};
+	const files = b.savedId ? await attachSaved(ctx.user!, d.id, Number(b.savedId)) : await addDraftAttachment(ctx.user!, d.id, b);
+	await audit(ctx, 'reply.file_attached', 'reply_draft', d.id, { saved: !!b.savedId, filename: b.filename });
+	return { attachments: files };
+});
+r.del('/api/drafts/:id/attachments/:aid', async (ctx) => {
+	requireRole(ctx.user, 'analyst');
+	const d = await draftAccess(ctx);
+	return { attachments: await removeDraftAttachment(ctx.user!, d.id, Number(ctx.params.aid)) };
+});
+
+// the saved library: everyone who answers email can use it; admins manage it (Settings)
+r.get('/api/attachments/saved', async (ctx) => {
+	requireRole(ctx.user, 'analyst');
+	return { attachments: await listSaved(ctx.user!.orgId) };
+});
+r.post('/api/attachments/saved', async (ctx) => {
+	requireRole(ctx.user, 'admin');
+	const list = await addSaved(ctx.user!, ctx.body || {});
+	await audit(ctx, 'attachment.saved', 'attachment', null, { name: ctx.body?.name, filename: ctx.body?.filename });
+	return { attachments: list };
+});
+r.del('/api/attachments/saved/:id', async (ctx) => {
+	requireRole(ctx.user, 'admin');
+	const list = await removeSaved(ctx.user!, Number(ctx.params.id));
+	await audit(ctx, 'attachment.removed', 'attachment', Number(ctx.params.id));
+	return { attachments: list };
+});
+// open a file: a saved one, or one on a reply the person can see
+r.get('/api/attachments/:id/file', async (ctx) => {
+	const f = await attachmentFile(ctx.user!.orgId, Number(ctx.params.id));
+	if (!f) throw new HttpError(404, 'File not found');
+	if (!f.saved) {
+		const owner = await one<any>('select id from reply_drafts where org_id=$1 and $2 = any(attachment_ids) limit 1', [ctx.user!.orgId, f.id]);
+		if (!owner) throw new HttpError(404, 'File not found');
+		ctx.params.id = String(owner.id);
+		await draftAccess(ctx);
+	}
+	return new Response(f.data, {
+		headers: {
+			'content-type': f.content_type || 'application/octet-stream',
+			'content-disposition': `inline; filename="${String(f.filename).replace(/[^\x20-\x7e]/g, '_').replace(/"/g, '')}"; filename*=UTF-8''${encodeURIComponent(f.filename)}`,
+			'cache-control': 'private, no-store',
+		},
+	});
+});
+
 r.post('/api/drafts/:id/dismiss', async (ctx) => {
 	requireRole(ctx.user, 'analyst');
 	const d = await draftAccess(ctx);
@@ -938,13 +1000,19 @@ r.patch('/api/mailboxes/:id', async (ctx) => {
 	requireRole(ctx.user, 'admin');
 	const { status, displayName, backfillDays, resetSync } = ctx.body || {};
 	if (status && !['active', 'paused'].includes(status)) throw new HttpError(400, 'Invalid status');
+	// reading again from scratch: staff forwards stored as internal mail are read again as the readers' emails
+	let forwardsReread = 0;
+	if (resetSync) {
+		const mbRow = await one<any>('select * from mailboxes where id=$1 and org_id=$2', [Number(ctx.params.id), ctx.user!.orgId]);
+		if (mbRow) forwardsReread = await forgetForwardsForReread(await getOrg(ctx.user!.orgId), mbRow);
+	}
 	await q(
 		`update mailboxes set status=coalesce($3,status), display_name=coalesce($4,display_name), backfill_days=coalesce($5,backfill_days),
 		   sync_state = case when $6 then '{}'::jsonb else sync_state end where id=$1 and org_id=$2`,
 		[Number(ctx.params.id), ctx.user!.orgId, status ?? null, displayName ?? null, backfillDays ?? null, !!resetSync],
 	);
-	await audit(ctx, 'mailbox.updated', 'mailbox', ctx.params.id, ctx.body);
-	return { success: true };
+	await audit(ctx, 'mailbox.updated', 'mailbox', ctx.params.id, { ...ctx.body, forwardsReread });
+	return { success: true, forwardsReread };
 });
 
 r.del('/api/mailboxes/:id', async (ctx) => {

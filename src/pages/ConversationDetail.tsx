@@ -147,7 +147,10 @@ export default function ConversationDetail() {
 										</div>
 									</div>
 									<div className="msg-body">{e.body_clean || e.body_text}</div>
-									<div className="xs faint" style={{ padding: '0 16px 10px' }}>Mailbox: {e.mailbox_address}</div>
+									<div className="xs faint" style={{ padding: '0 16px 10px' }}>
+										Mailbox: {e.mailbox_address}
+										{e.forwarded_by && <> · forwarded in by {e.forwarded_by}{e.forward_note ? `, with the note: "${e.forward_note.length > 200 ? `${e.forward_note.slice(0, 200)}…` : e.forward_note}"` : ''}</>}
+									</div>
 								</div>
 							))}
 						</div>

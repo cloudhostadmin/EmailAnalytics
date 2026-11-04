@@ -2168,6 +2168,68 @@ table.table {
 	opacity: 0.9;
 }
 
+// files sent with a reply, and the reader's email quoted under it
+.draft-files {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+	margin-top: 10px;
+	.file {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		max-width: 100%;
+		padding: 3px 4px 3px 10px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		background: var(--card);
+		font-size: 12px;
+		svg {
+			flex: none;
+			color: var(--text-2);
+		}
+	}
+	.file .name {
+		all: unset;
+		cursor: pointer;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		max-width: 260px;
+		color: var(--text);
+		&:hover {
+			text-decoration: underline;
+		}
+		&:focus-visible {
+			outline: 2px solid var(--pink);
+			outline-offset: 2px;
+		}
+	}
+	select.input.sm {
+		width: auto;
+		max-width: 280px;
+	}
+}
+.draft-quote {
+	margin-top: 12px;
+	padding: 8px 14px 10px;
+	border-left: 3px solid var(--border);
+	color: var(--text-2);
+	.q-body {
+		margin-top: 4px;
+		max-height: 160px;
+		overflow: auto;
+		font-size: 12px;
+		line-height: 1.5;
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+	}
+}
+.mt-4 {
+	margin-top: 4px;
+}
+
 // ── White sidebar with indigo highlights ──────────────────────────────────
 .aside {
 	background: #fff;
