@@ -19,8 +19,11 @@ export interface AttachmentMeta {
 	content_type: string;
 	size: number;
 	saved: boolean;
+	auto_keywords?: string;
 }
-const META = 'id, name, filename, content_type, size, saved';
+const META = 'id, name, filename, content_type, size, saved, auto_keywords';
+const cleanKeywords = (v: unknown) =>
+	[...new Set(String(v ?? '').split(/[,;\n]+/).map((k) => k.trim()).filter((k) => k.length >= 2))].slice(0, 40).join(', ').slice(0, 1000);
 
 function decodeUpload(input: { filename?: string; contentType?: string; base64?: string }) {
 	const filename = String(input.filename || '').replace(/[\\/:*?"<>|\r\n]+/g, '_').trim().slice(0, 180);
@@ -64,7 +67,7 @@ export async function addDraftAttachment(user: SessionUser, draftId: number, inp
 		`insert into attachments (org_id, filename, content_type, size, data, created_by) values ($1,$2,$3,$4,$5,$6) returning id`,
 		[user.orgId, f.filename, f.contentType, f.data.length, f.data, user.id],
 	);
-	await q(`update reply_drafts set attachment_ids = attachment_ids || $2::bigint, updated_at=now(), updated_by=$3 where id=$1`, [draftId, row.id, user.id]);
+	await q(`update reply_drafts set attachment_ids = attachment_ids || $2::bigint, edited=true, updated_at=now(), updated_by=$3 where id=$1`, [draftId, row.id, user.id]);
 	return draftAttachments(user.orgId, draftId);
 }
 
@@ -76,7 +79,7 @@ export async function attachSaved(user: SessionUser, draftId: number, attachment
 	if (!d.attachment_ids.map(Number).includes(Number(a.id))) {
 		if ((await totalBytes(d.attachment_ids)) + a.size > MAX_REPLY_BYTES)
 			throw new HttpError(400, `The files on one reply can add up to ${MAX_REPLY_BYTES / 1024 / 1024} MB`);
-		await q(`update reply_drafts set attachment_ids = attachment_ids || $2::bigint, updated_at=now(), updated_by=$3 where id=$1`, [draftId, a.id, user.id]);
+		await q(`update reply_drafts set attachment_ids = attachment_ids || $2::bigint, edited=true, updated_at=now(), updated_by=$3 where id=$1`, [draftId, a.id, user.id]);
 	}
 	return draftAttachments(user.orgId, draftId);
 }
@@ -84,7 +87,8 @@ export async function attachSaved(user: SessionUser, draftId: number, attachment
 /** Take a file off a reply; a file uploaded only for this reply is deleted. */
 export async function removeDraftAttachment(user: SessionUser, draftId: number, attachmentId: number) {
 	await draftForEdit(user, draftId);
-	await q(`update reply_drafts set attachment_ids = array_remove(attachment_ids, $2::bigint), updated_at=now(), updated_by=$3 where id=$1`, [draftId, attachmentId, user.id]);
+	// choosing the files is an edit: a later analysis keeps this reply's text and files as they are
+	await q(`update reply_drafts set attachment_ids = array_remove(attachment_ids, $2::bigint), edited=true, updated_at=now(), updated_by=$3 where id=$1`, [draftId, attachmentId, user.id]);
 	await q(
 		`delete from attachments a where a.id=$1 and a.org_id=$2 and not a.saved
 		   and not exists (select 1 from reply_drafts d where a.id = any(d.attachment_ids))`,
@@ -109,14 +113,45 @@ export async function listSaved(orgId: number): Promise<AttachmentMeta[]> {
 	return q<AttachmentMeta>(`select ${META} from attachments where org_id=$1 and saved order by lower(name), id`, [orgId]);
 }
 
-export async function addSaved(user: SessionUser, input: { name?: string; filename?: string; contentType?: string; base64?: string }) {
+export async function addSaved(user: SessionUser, input: { name?: string; filename?: string; contentType?: string; base64?: string; autoKeywords?: string }) {
 	const f = decodeUpload(input);
 	const name = String(input.name || '').trim().slice(0, 120) || f.filename.replace(/\.[^.]+$/, '');
 	await q(
-		`insert into attachments (org_id, saved, name, filename, content_type, size, data, created_by) values ($1,true,$2,$3,$4,$5,$6,$7)`,
-		[user.orgId, name, f.filename, f.contentType, f.data.length, f.data, user.id],
+		`insert into attachments (org_id, saved, name, filename, content_type, size, data, created_by, auto_keywords) values ($1,true,$2,$3,$4,$5,$6,$7,$8)`,
+		[user.orgId, name, f.filename, f.contentType, f.data.length, f.data, user.id, cleanKeywords(input.autoKeywords)],
 	);
 	return listSaved(user.orgId);
+}
+
+/** Rename a saved file, or change the words that attach it by itself. */
+export async function updateSaved(user: SessionUser, id: number, input: { name?: string; autoKeywords?: string }) {
+	await q(
+		`update attachments set name = coalesce(nullif($3, ''), name), auto_keywords = coalesce($4, auto_keywords) where id=$1 and org_id=$2 and saved`,
+		[id, user.orgId, input.name !== undefined ? String(input.name).trim().slice(0, 120) : null, input.autoKeywords !== undefined ? cleanKeywords(input.autoKeywords) : null],
+	);
+	return listSaved(user.orgId);
+}
+
+const escRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Saved files to attach by themselves to the reply to this email: those with a word that the reader's
+ * email mentions (English or Hindi, any case; "payment" also matches "payments").
+ */
+export async function autoFilesFor(orgId: number, text: string): Promise<{ id: number; name: string; filename: string; matched: string }[]> {
+	const rows = await q<any>(`select id, name, filename, auto_keywords from attachments where org_id=$1 and saved and auto_keywords <> '' order by id`, [orgId]);
+	const out: { id: number; name: string; filename: string; matched: string }[] = [];
+	for (const r of rows) {
+		for (const kw of String(r.auto_keywords).split(',').map((k) => k.trim()).filter(Boolean)) {
+			// a word or phrase on its own, not inside a longer word (trailing letters like a plural are allowed)
+			const re = new RegExp(`(?<![\\p{L}\\p{N}])${escRe(kw).replace(/\s+/g, '\\s+')}`, 'iu');
+			if (re.test(text)) {
+				out.push({ id: Number(r.id), name: r.name, filename: r.filename, matched: kw });
+				break;
+			}
+		}
+	}
+	return out;
 }
 
 /** Remove from the library; replies that already carry the file keep it. */

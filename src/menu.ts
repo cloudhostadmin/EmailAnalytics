@@ -1,7 +1,7 @@
 import type { IconType } from 'react-icons';
 import {
 	MdAutoAwesome, MdDashboard, MdNotificationsActive, MdBusiness, MdForum, MdChecklist,
-	MdInsights, MdAssessment, MdInbox, MdGroup, MdSettings, MdHistory, MdToday, MdDrafts, MdRequestQuote, MdGroups, MdHelpOutline, MdSync, MdContacts,
+	MdInsights, MdAssessment, MdInbox, MdGroup, MdSettings, MdHistory, MdToday, MdDrafts, MdRequestQuote, MdGroups, MdHelpOutline, MdSync, MdContacts, MdInventory2,
 } from 'react-icons/md';
 
 export interface MenuItem {
@@ -44,14 +44,16 @@ export const menu: { section: string; items: MenuItem[] }[] = [
 		],
 	},
 	{
+		section: 'Inventory',
+		items: [
+			{ id: 'inventory', text: 'Stock and sales', path: '/inventory', icon: MdInventory2, minRole: 'analyst' },
+		],
+	},
+	{
 		section: 'Admin',
 		items: [
 			{ id: 'customerdb', text: 'Customer database', path: '/admin/customers', icon: MdContacts, minRole: 'analyst' },
-			{ id: 'processing', text: 'Processing status', path: '/admin/processing', icon: MdSync, minRole: 'analyst' },
-			{ id: 'mailboxes', text: 'Mailboxes', path: '/admin/mailboxes', icon: MdInbox, minRole: 'analyst' },
-			{ id: 'users', text: 'Users and access', path: '/admin/users', icon: MdGroup, minRole: 'manager' },
-			{ id: 'settings', text: 'Settings', path: '/admin/settings', icon: MdSettings, minRole: 'manager' },
-			{ id: 'audit', text: 'Audit log', path: '/admin/audit', icon: MdHistory, minRole: 'admin' },
+			{ id: 'settings', text: 'Settings', path: '/admin/settings', icon: MdSettings, minRole: 'analyst', also: ['/admin/mailboxes', '/admin/users', '/admin/processing', '/admin/audit', '/admin/addresses'] },
 			{ id: 'help', text: 'Help and templates', path: '/help', icon: MdHelpOutline },
 		],
 	},

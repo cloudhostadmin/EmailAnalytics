@@ -61,7 +61,7 @@ async function replyContext(conversationId: number) {
 const reSubject = (s: string) => (/^\s*re:/i.test(s || '') ? s : `Re: ${s || ''}`.trim());
 
 /** Called after each analysis. Keeps a person's edits; refreshes untouched drafts; clears drafts no longer needed. */
-export async function upsertDraft(conv: any, needsReply: boolean, body: string, model: string) {
+export async function upsertDraft(conv: any, needsReply: boolean, body: string, model: string, autoFiles: number[] = []) {
 	const org = await getOrg(conv.org_id);
 	const existing = await one<any>('select * from reply_drafts where conversation_id=$1', [conv.id]);
 	if (!needsReply || !body?.trim() || !org.settings.autoDrafts) {
@@ -81,15 +81,17 @@ export async function upsertDraft(conv: any, needsReply: boolean, body: string, 
 		await q(
 			`update reply_drafts set body=$2, generated_body=$2, model=$3, edited=false, status='draft', to_addresses=$4, cc_addresses=$5, subject=$6,
 			   reply_to_email_id=$7, send_mailbox_id = case when sender_chosen and send_mailbox_id is not null then send_mailbox_id else $8 end,
+			   -- files: a new reply after one was sent starts with the automatic ones; a draft keeps its files and gains them
+			   attachment_ids = case when $9 then $10::bigint[] else (select array(select distinct unnest(attachment_ids || $10::bigint[]))) end,
 			   generated_at=now(), updated_at=now(), last_error=null where id=$1`,
-			[existing.id, body, model, ctx.to, ctx.cc, reSubject(conv.subject), ctx.last.id, ctx.via?.mailbox_id ?? null],
+			[existing.id, body, model, ctx.to, ctx.cc, reSubject(conv.subject), ctx.last.id, ctx.via?.mailbox_id ?? null, existing.status !== 'draft', autoFiles],
 		);
 		return;
 	}
 	await q(
-		`insert into reply_drafts (org_id, conversation_id, body, generated_body, model, to_addresses, cc_addresses, subject, reply_to_email_id, send_mailbox_id)
-		 values ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9) on conflict (conversation_id) do nothing`,
-		[conv.org_id, conv.id, body, model, ctx.to, ctx.cc, reSubject(conv.subject), ctx.last.id, ctx.via?.mailbox_id ?? null],
+		`insert into reply_drafts (org_id, conversation_id, body, generated_body, model, to_addresses, cc_addresses, subject, reply_to_email_id, send_mailbox_id, attachment_ids)
+		 values ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9,$10) on conflict (conversation_id) do nothing`,
+		[conv.org_id, conv.id, body, model, ctx.to, ctx.cc, reSubject(conv.subject), ctx.last.id, ctx.via?.mailbox_id ?? null, autoFiles],
 	);
 }
 

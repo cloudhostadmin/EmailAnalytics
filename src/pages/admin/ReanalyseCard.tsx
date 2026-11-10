@@ -22,6 +22,9 @@ export default function ReanalyseCard({ provider }: { provider?: string }) {
 	const [from, setFrom] = useState(daysAgo(30));
 	const [to, setTo] = useState(isoDay(new Date()));
 	const [onlyRules, setOnlyRules] = useState(false);
+	// the AI in use, from the system status when the page does not pass it
+	const sys = useQuery({ queryKey: ['system-status'], queryFn: () => api('/system/status'), enabled: !provider, staleTime: 30_000 });
+	provider = provider ?? sys.data?.ai?.provider;
 
 	const ai = provider === 'anthropic' ? 'Claude' : provider === 'gemini' ? 'Gemini' : 'the AI';
 	const noAi = provider === 'heuristic';
@@ -96,8 +99,8 @@ export default function ReanalyseCard({ provider }: { provider?: string }) {
 							<div className="field"><label>To</label><input className="input" type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} /></div>
 						</div>
 						<div className="row wrap">
-							{[7, 30, 90].map((d) => (
-								<button key={d} type="button" className="btn ghost sm" onClick={() => { setFrom(daysAgo(d)); setTo(isoDay(new Date())); }}>Last {d} days</button>
+							{[1, 7, 30, 90].map((d) => (
+								<button key={d} type="button" className="btn ghost sm" onClick={() => { setFrom(daysAgo(d)); setTo(isoDay(new Date())); }}>{d === 1 ? 'Since yesterday' : `Last ${d} days`}</button>
 							))}
 						</div>
 					</div>

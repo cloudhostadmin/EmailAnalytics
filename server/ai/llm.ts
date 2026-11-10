@@ -6,6 +6,7 @@
 import { q } from '../db';
 import { heuristicAnalyse } from './heuristic';
 import { normaliseSubcategory, taxonomyForPrompt } from './taxonomy';
+import { normalisePurposes, purposesForPrompt } from './purposes';
 import { ANALYSIS_SCHEMA, BUSINESS_CATEGORIES, CATEGORIES, PROPOSAL_STAGES, type Analysis, type ThreadInput } from './types';
 
 export type Provider = 'gemini' | 'anthropic' | 'openai' | 'azure' | 'heuristic';
@@ -50,14 +51,21 @@ Rules:
 - subcategory: pick exactly one subgroup key from the list for the business_category you chose:
 ${taxonomyForPrompt()}
 - Reply templates: when a default template is given for the subgroup you chose, follow its structure, order and wording closely, translating it if the customer wrote in another language. Replace {{name}}, {{order_ref}}, {{book}} and similar fields with facts from the emails, or with a [[provide: …]] placeholder when the fact is not known. Keep the template's own [[provide: …]] placeholders unless the emails or reference information answer them. Answer anything the customer asked that the template does not cover.
-- Catalogue and FAQ entries given under "Matched reference data" are facts you may rely on (title, price, stock, policy). Prefer them over placeholders.`;
+- Catalogue and FAQ entries given under "Matched reference data" are facts you may rely on (title, price, stock, policy). Prefer them over placeholders.
+- Stock and addresses: when "Stock and addresses" information is given, it is the live Tally stock. Tell the reader the exact number of copies and the price for each book they asked about, for Gorakhpur and, when given, the branch nearest to them (name the branch). A book shown as out of stock is not available there now; never promise a date. Books are sent by post and abroad only from Gorakhpur. When several editions or languages match, list them with their codes and ask which one the reader wants. Never state stock or prices for a book that is not listed; use a [[provide: …]] placeholder instead.
+- When the reader asks for an address, give exactly the address(es) listed under "Stock and addresses" (the place they named, or the full list when they named none), with phone numbers and e-mail as listed. Use the Hindi lines in a Hindi reply. Never invent an address, phone number or e-mail.
+- purposes: list every reason the external party contacted Gita Press in this thread, from: ${purposesForPrompt()}. Kalyan is one purpose whatever the Kalyan matter. Use international whenever the reader is outside India. Empty list for internal, automated and supplier threads.`;
 
 function buildPrompt(input: ThreadInput): string {
 	const lines = [
 		input.replyKnowledge ? `Reference information from ${input.orgName} (use it in replies when relevant):\n${input.replyKnowledge.slice(0, 4000)}\n` : '',
+		input.stockInfo ? `Stock and addresses (Gita Press records, use them in the reply):\n${input.stockInfo.slice(0, 6000)}\n` : '',
 		input.reference?.length ? `Matched reference data:\n${input.reference.map((r) => `- [${r.kind}] ${r.title}: ${r.text}`).join('\n').slice(0, 4000)}\n` : '',
 		input.replyTemplates?.length ? `Default reply templates for the likely group (${input.replyTemplates[0].group}):\n${input.replyTemplates.map((t) => `### ${t.subgroup} (${t.label})\n${t.body}`).join('\n\n').slice(0, 6000)}\n` : '',
 		`Reply signature:\n${input.replySignature || `Regards,\n${input.orgName}`}\n`,
+		input.attachments?.length
+			? `Files that will be attached to the reply: ${input.attachments.join('; ')}. In the reply, say briefly that they are attached where they answer the reader (for example "Our bank details for payment are attached."). Do not leave a [[provide: …]] item for information these files give, and do not invent their contents.\n`
+			: '',
 		input.isInternal ? 'Thread type: internal (staff only, no external party)' : `External party: ${input.customerName || 'Unknown'} (tier: ${input.customerTier || 'standard'})`,
 		input.customerProfile ? `Customer database record (use it to address them and to avoid asking for details already on file): ${input.customerProfile}` : '',
 		`Conversation id: ${input.conversationId}`,
@@ -80,34 +88,59 @@ async function logUsage(orgId: number | null, model: string, inTok: number, outT
 	]).catch(() => {});
 }
 
-// Newer Claude models (the 5.5 generation) reject forced tool use (tool_choice "tool" or "any") with a 400.
-// Such a request is switched to tool_choice "auto" with the tool asked for in the prompt, and that is
-// remembered for the rest of the process, so only the first call ever hits the error.
-let forcedToolUnsupported = false;
-function useAutoToolChoice(body: any): boolean {
-	const tc = body.tool_choice;
-	if (!tc || (tc.type !== 'tool' && tc.type !== 'any')) return false;
-	body.tool_choice = { type: 'auto' };
-	const last = body.messages?.[body.messages.length - 1];
-	const tool = tc.type === 'tool' ? `the ${tc.name} tool` : 'the provided tool';
-	if (last && typeof last.content === 'string') last.content += `\n\nAnswer only by calling ${tool} exactly once, with no other text.`;
-	return true;
+/**
+ * Headers for every Claude API call. The API key and the workspace ID are separate values:
+ * ANTHROPIC_WORKSPACE_ID (optional) is sent as its own header so calls are attributed to that workspace.
+ */
+export function anthropicHeaders(): Record<string, string> {
+	const h: Record<string, string> = {
+		'x-api-key': process.env.ANTHROPIC_API_KEY!,
+		'anthropic-version': '2023-06-01',
+		'content-type': 'application/json',
+	};
+	const workspace = (process.env.ANTHROPIC_WORKSPACE_ID || '').trim();
+	if (workspace) h['anthropic-workspace-id'] = workspace;
+	return h;
 }
-const textOf = (data: any) => (data?.content || []).filter((c: any) => c.type === 'text').map((c: any) => c.text).join('');
+
+/**
+ * Claude call that must end in a call to one tool. Forces the tool with tool_choice where the model
+ * allows it; some models reject forced tool_choice ("type tool and any are not supported"), so on that
+ * error we switch to tool_choice auto with an explicit instruction, and also accept a JSON reply as text.
+ */
+let forcedToolUnsupported = false;
+async function anthropicToolCall(body: any, name: string): Promise<{ data: any; input: any | null }> {
+	const auto = () => ({
+		...body,
+		tool_choice: { type: 'auto' },
+		messages: body.messages.map((m: any, i: number) => i === body.messages.length - 1 && typeof m.content === 'string'
+			? { ...m, content: `${m.content}\n\nYou must answer by calling the ${name} tool. Do not reply with text.` }
+			: m),
+	});
+	let data: any;
+	if (!forcedToolUnsupported) {
+		try {
+			data = await anthropicCall({ ...body, tool_choice: { type: 'tool', name } });
+		} catch (e: any) {
+			if (e instanceof QuotaError || !/tool_choice/i.test(e?.message || '')) throw e;
+			forcedToolUnsupported = true;
+		}
+	}
+	if (!data) data = await anthropicCall(auto());
+	const tool = (data.content || []).find((c: any) => c.type === 'tool_use' && (!c.name || c.name === name));
+	if (tool) return { data, input: tool.input };
+	const text = (data.content || []).filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n');
+	let input: any = null;
+	try { input = text ? parseJsonLoose(text) : null; } catch { input = null; }
+	return { data, input };
+}
 
 async function anthropicCall(body: any) {
 	await pace();
-	if (forcedToolUnsupported) useAutoToolChoice(body);
 	for (let i = 0; i < 4; i++) {
 		const res = await fetch(`${(process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com').replace(/\/$/, '')}/v1/messages`, {
 			method: 'POST',
-			headers: {
-				'x-api-key': process.env.ANTHROPIC_API_KEY!,
-				'anthropic-version': '2023-06-01',
-				'content-type': 'application/json',
-				// keys that are not scoped to a workspace must name the workspace on every request
-				...(process.env.ANTHROPIC_WORKSPACE_ID?.trim() ? { 'anthropic-workspace-id': process.env.ANTHROPIC_WORKSPACE_ID.trim() } : {}),
-			},
+			headers: anthropicHeaders(),
 			body: JSON.stringify(body),
 			signal: AbortSignal.timeout(120_000),
 		});
@@ -120,10 +153,6 @@ async function anthropicCall(body: any) {
 		}
 		if (!res.ok) {
 			const msg = data?.error?.message || 'error';
-			if (res.status === 400 && /tool_choice/i.test(msg) && /not supported/i.test(msg) && useAutoToolChoice(body)) {
-				forcedToolUnsupported = true;
-				continue;
-			}
 			// a wrong or revoked key fails every call: pause and say so, instead of failing thousands of threads one by one
 			if (res.status === 401 || res.status === 403) throw new QuotaError(`Claude rejected the API key (${res.status}: ${msg}). Check ANTHROPIC_API_KEY in the app's settings (.env on the server), then restart the app.`, 900);
 			// out of credit or spend limit reached: pause instead of failing every thread
@@ -279,6 +308,7 @@ function coerce(raw: any, fallback: Analysis): Analysis {
 	return {
 		business_category: bc,
 		subcategory: normaliseSubcategory(bc, raw.subcategory || (bc === fallback.business_category ? fallback.subcategory : '')),
+		purposes: Array.isArray(raw.purposes) ? normalisePurposes(raw.purposes) : fallback.purposes,
 		proposal: pr,
 		summary: String(raw.summary || fallback.summary).slice(0, 1200),
 		sentiment: pick(raw.sentiment, ['positive', 'neutral', 'negative'] as const, fallback.sentiment),
@@ -348,21 +378,17 @@ export async function analyseThread(input: ThreadInput, orgId: number): Promise<
 			return { analysis: coerce(parseJsonLoose(r.text), fallback), model };
 		}
 		if (provider === 'anthropic') {
-			const data = await anthropicCall({
+			const { data, input: result } = await anthropicToolCall({
 				model,
 				max_tokens: 6000,
 				// the system prompt is identical for every thread, so it is cached
 				system: [{ type: 'text', text: SYSTEM(input.orgName), cache_control: { type: 'ephemeral' } }],
 				tools: [{ name: 'record_analysis', description: 'Record the structured analysis of the email conversation.', input_schema: ANALYSIS_SCHEMA }],
-				tool_choice: { type: 'tool', name: 'record_analysis' },
 				messages: [{ role: 'user', content: buildPrompt(input) }],
-			});
+			}, 'record_analysis');
 			await logUsage(orgId, model, data.usage?.input_tokens, data.usage?.output_tokens, 'analysis');
-			const tool = (data.content || []).find((c: any) => c.type === 'tool_use');
-			// with tool_choice "auto" the model may, rarely, answer with the JSON as text instead
-			const parsed = tool?.input ?? (textOf(data).trim() ? parseJsonLoose(textOf(data)) : null);
-			if (!parsed) throw new Error(`No tool_use in response${data.stop_reason ? ` (stop_reason: ${data.stop_reason})` : ''}`);
-			return { analysis: coerce(parsed, fallback), model };
+			if (!result) throw new Error(`No tool_use in response${data.stop_reason ? ` (stop_reason: ${data.stop_reason})` : ''}`);
+			return { analysis: coerce(result, fallback), model };
 		}
 		const data = await openaiCall({
 			model,
@@ -397,11 +423,9 @@ export async function extractJson(orgId: number, system: string, prompt: string,
 	}
 	if (provider === 'anthropic') {
 		// max_tokens leaves room for the thinking that newer models always do before answering
-		const data = await anthropicCall({ model, max_tokens: 4000, system, tools: [{ name, description: 'Record the extracted fields.', input_schema: schema }], tool_choice: { type: 'tool', name }, messages: [{ role: 'user', content: prompt }] });
+		const { data, input } = await anthropicToolCall({ model, max_tokens: 4000, system, tools: [{ name, description: 'Record the extracted fields.', input_schema: schema }], messages: [{ role: 'user', content: prompt }] }, name);
 		await logUsage(orgId, model, data.usage?.input_tokens, data.usage?.output_tokens, name);
-		const tool = (data.content || []).find((c: any) => c.type === 'tool_use');
-		if (tool) return tool.input || null;
-		try { return textOf(data).trim() ? parseJsonLoose(textOf(data)) : null; } catch { return null; }
+		return input || null;
 	}
 	const data = await openaiCall({ model, temperature: 0, messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }], tools: [{ type: 'function', function: { name, description: 'Record the extracted fields.', parameters: schema } }], tool_choice: { type: 'function', function: { name } } });
 	await logUsage(orgId, model, data.usage?.prompt_tokens, data.usage?.completion_tokens, name);
