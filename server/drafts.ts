@@ -100,17 +100,19 @@ const DRAFT_COLS = `d.id, d.conversation_id, d.body, d.edited, d.status, d.to_ad
 	(select coalesce(json_agg(json_build_object('id', a.id, 'name', a.name, 'filename', a.filename, 'content_type', a.content_type, 'size', a.size, 'saved', a.saved)
 	   order by array_position(d.attachment_ids, a.id)), '[]') from attachments a where a.id = any(d.attachment_ids)) as attachments,
 	c.subject as conv_subject, c.rag, c.urgency, c.sentiment, c.summary, c.last_inbound_at, c.business_category, c.subcategory, c.awaiting_reply,
-	cu.name as customer_name, cu.tier as customer_tier, su.full_name as sent_by_name, uu.full_name as updated_by_name`;
+cu.name as customer_name, cu.tier as customer_tier, cu.buyer_tier, su.full_name as sent_by_name, uu.full_name as updated_by_name`;
 const DRAFT_JOIN = `from reply_drafts d join conversations c on c.id=d.conversation_id left join customers cu on cu.id=c.customer_id
 	left join mailboxes m on m.id=d.send_mailbox_id left join users su on su.id=d.sent_by left join users uu on uu.id=d.updated_by`;
 
 const withMeta = (d: any) => d && { ...d, placeholders: placeholders(d.body), canSend: gmailSendEnabled() && !!d.send_mailbox_id, sendEnabled: gmailSendEnabled() };
 
+/** Emails from Platinum and Gold customers come first in every order of the list (not in Sent). */
+const IMPORTANT = `case coalesce(cu.buyer_tier, 'regular') when 'platinum' then 0 when 'gold' then 1 else 2 end`;
 const DRAFT_SORTS: Record<string, string> = {
-	priority: `case c.rag when 'red' then 0 when 'amber' then 1 else 2 end, c.last_inbound_at desc nulls last`,
-	newest: 'c.last_inbound_at desc nulls last',
-	oldest: 'c.last_inbound_at asc nulls last',
-	ready: `case when d.body ~* '\\[\\[\\s*provide\\s*:' then 1 else 0 end, c.last_inbound_at desc nulls last`,
+	priority: `${IMPORTANT}, case c.rag when 'red' then 0 when 'amber' then 1 else 2 end, c.last_inbound_at desc nulls last`,
+	newest: `${IMPORTANT}, c.last_inbound_at desc nulls last`,
+	oldest: `${IMPORTANT}, c.last_inbound_at asc nulls last`,
+	ready: `${IMPORTANT}, case when d.body ~* '\\[\\[\\s*provide\\s*:' then 1 else 0 end, c.last_inbound_at desc nulls last`,
 	sent: 'd.sent_at desc nulls last',
 };
 export async function listDrafts(where: string, params: unknown[], status: string, sort = 'priority') {
